@@ -56,14 +56,14 @@ app.get('*', (_req, res) => {
   res.sendFile(indexHtml, (err) => {
     if (err) {
       // In development mode before build:
-      res.status(200).send('LosslessDrop API is running. Start Vite dev server for frontend.');
+      res.status(200).send('PrivateSend API is running. Start Vite dev server for frontend.');
     }
   });
 });
 
 if (process.env.NODE_ENV !== 'test') {
   server.listen(config.port, config.host, () => {
-    console.log(`\n⚡ LosslessDrop Server running on http://${config.host}:${config.port}`);
+    console.log(`\n⚡ PrivateSend Server running on http://${config.host}:${config.port}`);
     console.log(`🔒 True P2P Lossless Transmission ready (Zero Server Persistence)\n`);
   });
 }
