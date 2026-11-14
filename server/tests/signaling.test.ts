@@ -332,8 +332,17 @@ describe('Signaling Server Integration', () => {
     const acceptedData = await aAcceptedPromise;
     expect(acceptedData.receiverPeerId).toBe('peer-b-123');
 
+    // Test that a third client C connecting gets the existing peer list immediately
+    const clientC = ioc(`http://localhost:${port}`) as ClientSocket<ServerToClientEvents, ClientToServerEvents>;
+    const cPeersPromise = new Promise<any[]>((resolve) => {
+      clientC.on('local:peers-updated', (peers) => resolve(peers));
+    });
+    const cPeers = await cPeersPromise;
+    expect(cPeers.some((p) => p.peerId === 'peer-b-123')).toBe(true);
+
     clientA.disconnect();
     clientB.disconnect();
+    clientC.disconnect();
   });
 
   it('creates and joins broadcast rooms with multiple receivers', async () => {

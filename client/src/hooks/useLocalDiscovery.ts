@@ -16,7 +16,10 @@ export function useLocalDiscovery(peerId: string) {
   const socketRef = useRef<Socket<ServerToClientEvents, ClientToServerEvents> | null>(null);
   const requestResolversRef = useRef<Map<string, (receiverPeerId: string) => void>>(new Map());
   const requestRejectorsRef = useRef<Map<string, (reason: string) => void>>(new Map());
+  const peerIdRef = useRef<string>(peerId);
+  peerIdRef.current = peerId;
 
+  // Initialize socket connection once on mount
   useEffect(() => {
     const socketUrl =
       typeof window !== 'undefined'
@@ -30,10 +33,10 @@ export function useLocalDiscovery(peerId: string) {
     socketRef.current = socket;
 
     socket.on('connect', () => {
-      if (peerId) {
+      if (peerIdRef.current) {
         socket.emit('local:announce', {
           deviceName: getFriendlyDeviceName(),
-          peerId,
+          peerId: peerIdRef.current,
         });
       }
     });
@@ -41,7 +44,7 @@ export function useLocalDiscovery(peerId: string) {
     socket.on('local:peers-updated', (peers) => {
       // Filter out self
       const others = peers.filter(
-        (p) => p.socketId !== socket.id && (!peerId || p.peerId !== peerId)
+        (p) => p.socketId !== socket.id && (!peerIdRef.current || p.peerId !== peerIdRef.current)
       );
       setNearbyPeers(others);
     });
@@ -74,15 +77,33 @@ export function useLocalDiscovery(peerId: string) {
 
       if (rejector) {
         rejector(reason);
+        if (requestId) {
+          requestRejectorsRef.current.delete(requestId);
+        }
+        requestRejectorsRef.current.delete('latest');
       }
-      requestRejectorsRef.current.clear();
-      requestResolversRef.current.clear();
     });
 
     return () => {
       socket.disconnect();
       socketRef.current = null;
     };
+  }, []);
+
+  // Whenever peerId changes (e.g. room code generated, refreshed, or cleared), announce/unannounce to cluster
+  useEffect(() => {
+    if (!socketRef.current?.connected) return;
+    if (peerId) {
+      socketRef.current.emit('local:announce', {
+        deviceName: getFriendlyDeviceName(),
+        peerId,
+      });
+    } else {
+      socketRef.current.emit('local:announce', {
+        deviceName: '',
+        peerId: '',
+      });
+    }
   }, [peerId]);
 
   const requestTransfer = useCallback(
@@ -110,20 +131,31 @@ export function useLocalDiscovery(peerId: string) {
           reject(new Error('Transfer request timed out.'));
         }, 30000);
 
+        const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
         socketRef.current.emit('local:request-transfer', {
+          requestId,
           targetSocketId,
           senderDeviceName: getFriendlyDeviceName(),
           senderPeerId: peerId,
           ...details,
         });
 
-        // Store resolver
-        const requestId = 'latest';
+        // Store resolver mapped to exact requestId and fallback 'latest'
         requestResolversRef.current.set(requestId, (peer) => {
           clearTimeout(timeout);
           resolve(peer);
         });
+        requestResolversRef.current.set('latest', (peer) => {
+          clearTimeout(timeout);
+          resolve(peer);
+        });
+
         requestRejectorsRef.current.set(requestId, (reason) => {
+          clearTimeout(timeout);
+          reject(new Error(reason));
+        });
+        requestRejectorsRef.current.set('latest', (reason) => {
           clearTimeout(timeout);
           reject(new Error(reason));
         });

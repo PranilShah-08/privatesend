@@ -196,6 +196,7 @@ export interface ClientToServerEvents {
   // Local Wi-Fi & Multi-Receiver Events
   'local:announce': (data: { deviceName: string; peerId: string }) => void;
   'local:request-transfer': (req: {
+    requestId?: string;
     targetSocketId: string;
     senderDeviceName: string;
     senderPeerId: string;
@@ -210,6 +211,7 @@ export interface ClientToServerEvents {
     senderSocketId: string;
     accepted: boolean;
     receiverPeerId?: string;
+    reason?: string;
   }) => void;
   'broadcast:create': () => void;
   'broadcast:join': (data: { code: string }) => void;

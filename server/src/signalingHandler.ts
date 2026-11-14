@@ -28,6 +28,17 @@ export function setupSignalingHandler(
       : undefined;
     const clientIp = forwardedIp || socket.handshake.address || 'unknown';
 
+    // 0. Auto-join local subnet cluster on connection
+    const clusterId = extractSubnetClusterId(clientIp);
+    socket.join(`cluster:${clusterId}`);
+    socketToClusterId.set(socket.id, clusterId);
+
+    // Send currently registered peers in this subnet cluster immediately
+    const existingPeersMap = localPeersByCluster.get(clusterId);
+    if (existingPeersMap && existingPeersMap.size > 0) {
+      socket.emit('local:peers-updated', Array.from(existingPeersMap.values()));
+    }
+
     // 1. Create 1-to-1 Room (Receiver)
     socket.on('room:create', () => {
       const room = roomManager.createRoom(socket.id, 'direct');
@@ -131,36 +142,58 @@ export function setupSignalingHandler(
       }
     });
 
-    // 5. Local Wi-Fi Presence Announcement
+    // 5. Local Wi-Fi Presence Announcement (or unannounce if peerId empty)
     socket.on('local:announce', (data) => {
-      if (!data || !data.peerId) return;
+      if (!data) return;
       const clusterId = extractSubnetClusterId(clientIp);
+      const peersMap = localPeersByCluster.get(clusterId);
+
+      // Handle unannounce when client switches to sender or roomCode cleared
+      if (!data.peerId || typeof data.peerId !== 'string' || !data.peerId.trim()) {
+        if (peersMap) {
+          const removed = peersMap.delete(socket.id);
+          if (removed) {
+            if (peersMap.size === 0) {
+              localPeersByCluster.delete(clusterId);
+            }
+            const peerList = Array.from(peersMap.values());
+            io.to(`cluster:${clusterId}`).emit('local:peers-updated', peerList);
+          }
+        }
+        return;
+      }
+
       socket.join(`cluster:${clusterId}`);
       socketToClusterId.set(socket.id, clusterId);
 
-      let peersMap = localPeersByCluster.get(clusterId);
-      if (!peersMap) {
-        peersMap = new Map();
-        localPeersByCluster.set(clusterId, peersMap);
+      let targetPeersMap = peersMap;
+      if (!targetPeersMap) {
+        targetPeersMap = new Map();
+        localPeersByCluster.set(clusterId, targetPeersMap);
       }
+
+      const cleanName =
+        typeof data.deviceName === 'string' && data.deviceName.trim()
+          ? data.deviceName.trim().slice(0, 50)
+          : 'Nearby Device';
 
       const peer: NearbyPeer = {
         socketId: socket.id,
-        peerId: data.peerId,
-        deviceName: data.deviceName || 'Nearby Device',
+        peerId: data.peerId.trim(),
+        deviceName: cleanName,
         joinedAt: Date.now(),
       };
-      peersMap.set(socket.id, peer);
+      targetPeersMap.set(socket.id, peer);
 
       // Broadcast peer list to everyone in the local subnet cluster
-      const peerList = Array.from(peersMap.values());
+      const peerList = Array.from(targetPeersMap.values());
       io.to(`cluster:${clusterId}`).emit('local:peers-updated', peerList);
     });
 
     // 6. Local Wi-Fi Transfer Request & Consent
     socket.on('local:request-transfer', (req) => {
       if (!req || !req.targetSocketId) return;
-      const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const requestId = req.requestId || `req-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       io.to(req.targetSocketId).emit('local:incoming-request', {
         ...req,
         requestId,
@@ -178,7 +211,7 @@ export function setupSignalingHandler(
       } else {
         io.to(res.senderSocketId).emit('local:request-declined', {
           requestId: res.requestId,
-          reason: 'Receiver declined the transfer request.',
+          reason: res.reason || 'Receiver declined the transfer request.',
         });
       }
     });
@@ -238,10 +271,11 @@ export function setupSignalingHandler(
         socketToClusterId.delete(socket.id);
         const peersMap = localPeersByCluster.get(clusterId);
         if (peersMap) {
-          peersMap.delete(socket.id);
-          if (peersMap.size === 0) {
-            localPeersByCluster.delete(clusterId);
-          } else {
+          const removed = peersMap.delete(socket.id);
+          if (removed) {
+            if (peersMap.size === 0) {
+              localPeersByCluster.delete(clusterId);
+            }
             const peerList = Array.from(peersMap.values());
             io.to(`cluster:${clusterId}`).emit('local:peers-updated', peerList);
           }

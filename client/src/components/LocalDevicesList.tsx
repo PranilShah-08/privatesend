@@ -7,10 +7,11 @@ export interface LocalDevicesListProps {
   onSelectPeer: (peer: NearbyPeer) => void;
   statusText?: string | null;
   isTransferring?: boolean;
+  selectedCount?: number;
 }
 
-function getDeviceIcon(name: string) {
-  const lower = name.toLowerCase();
+function getDeviceIcon(name?: string) {
+  const lower = (typeof name === 'string' ? name : '').toLowerCase();
   if (lower.includes('iphone') || lower.includes('android') || lower.includes('mobile')) {
     return <Smartphone className="w-4 h-4 text-emerald-500" />;
   }
@@ -25,6 +26,7 @@ export const LocalDevicesList: React.FC<LocalDevicesListProps> = ({
   onSelectPeer,
   statusText,
   isTransferring = false,
+  selectedCount = 0,
 }) => {
   return (
     <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 sm:p-5 shadow-sm space-y-3">
@@ -83,11 +85,14 @@ export const LocalDevicesList: React.FC<LocalDevicesListProps> = ({
 
               <button
                 type="button"
-                disabled={isTransferring}
+                disabled={isTransferring || selectedCount === 0}
+                title={selectedCount === 0 ? 'Select files or a folder first' : 'Send files to this device'}
                 onClick={() => onSelectPeer(peer)}
                 className="inline-flex items-center gap-1 py-1.5 px-3 rounded-lg text-xs font-medium text-white bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm shrink-0"
               >
-                <span>Send</span>
+                <span>
+                  {selectedCount > 0 ? `Send (${selectedCount})` : 'Send'}
+                </span>
                 <ArrowRight className="w-3 h-3" />
               </button>
             </div>

@@ -64,16 +64,25 @@ export const App: React.FC = () => {
   };
 
   const handleSelectNearbyPeer = async (peer: NearbyPeer) => {
+    if (selectedFiles.length === 0) {
+      return;
+    }
+
     try {
       const receiverPeerId = await requestTransfer(peer.socketId, {
-        fileCount: selectedFiles.length || 1,
+        fileCount: selectedFiles.length,
         totalBytes: selectedFiles.reduce((acc, f) => acc + f.size, 0),
         firstFileName: selectedFiles[0]?.name || (isFolder ? rootFolderName : 'file'),
         isFolder,
         folderName: isFolder ? rootFolderName : undefined,
       });
+
       if (receiverPeerId) {
-        await joinRoom(receiverPeerId);
+        const connected = await joinRoom(receiverPeerId);
+        if (connected) {
+          // Automatically start transmitting files once peer consented and connected!
+          await sendFiles(true);
+        }
       }
     } catch (err) {
       console.error('Local peer transfer request rejected or failed', err);
@@ -143,6 +152,7 @@ export const App: React.FC = () => {
                   onSelectPeer={handleSelectNearbyPeer}
                   statusText={requestStatusText}
                   isTransferring={isTransferring}
+                  selectedCount={selectedFiles.length}
                 />
               )}
             </>

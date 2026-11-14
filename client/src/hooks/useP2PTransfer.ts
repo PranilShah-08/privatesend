@@ -485,7 +485,7 @@ export function useP2PTransfer() {
   }, [handleItemComplete]);
 
   // Join Room as Sender
-  const joinRoom = useCallback(async (code: string) => {
+  const joinRoom = useCallback(async (code: string): Promise<boolean> => {
     setErrorText(null);
     setRoomCode(code);
     roomCodeRef.current = code;
@@ -493,8 +493,10 @@ export function useP2PTransfer() {
 
     try {
       await peerServiceRef.current?.connectToReceiver(code);
+      return true;
     } catch (err: any) {
       setErrorText(err.message || 'Failed to connect to receiver.');
+      return false;
     }
   }, []);
 
@@ -773,6 +775,12 @@ export function useP2PTransfer() {
   const sendFiles = useCallback(
     async (enableE2EE = true) => {
       if (selectedFiles.length === 0) return;
+
+      if (!peerServiceRef.current?.isConnected()) {
+        setErrorText('Cannot send: No active peer connection.');
+        setIsTransferring(false);
+        return;
+      }
 
       setIsTransferring(true);
       setStatusText('Hashing files bit-for-bit with SHA-256...');
