@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { packChunkHeader, unpackChunkHeader, calculateTotalChunks, DEFAULT_CHUNK_SIZE } from '../src/services/chunkerService.js';
+import {
+  packChunkHeader,
+  unpackChunkHeader,
+  packBatchChunkHeader,
+  unpackBatchChunkHeader,
+  calculateTotalChunks,
+  DEFAULT_CHUNK_SIZE,
+} from '../src/services/chunkerService.js';
 
 describe('chunkerService', () => {
   it('calculates total chunks correctly', () => {
@@ -29,5 +36,18 @@ describe('chunkerService', () => {
     const unpacked = unpackChunkHeader(packed);
 
     expect(unpacked.chunkIndex).toBe(chunkIndex);
+  });
+
+  it('packs and unpacks 8-byte batch headers with fileIndex and chunkIndex', () => {
+    const rawPayload = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
+    const fileIndex = 5;
+    const chunkIndex = 99;
+
+    const packed = packBatchChunkHeader(fileIndex, chunkIndex, rawPayload.buffer);
+    const unpacked = unpackBatchChunkHeader(packed);
+
+    expect(unpacked.fileIndex).toBe(fileIndex);
+    expect(unpacked.chunkIndex).toBe(chunkIndex);
+    expect(new Uint8Array(unpacked.payload)).toEqual(rawPayload);
   });
 });

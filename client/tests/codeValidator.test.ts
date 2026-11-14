@@ -1,7 +1,26 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeRoomCode, isValidRoomCode } from '../src/utils/codeValidator.js';
+import { normalizeRoomCode, isValidRoomCode, generateRoomCode } from '../src/utils/codeValidator.js';
 
 describe('codeValidator', () => {
+  it('generates valid room codes', () => {
+    const code = generateRoomCode();
+    expect(isValidRoomCode(code)).toBe(true);
+    expect(code).toMatch(/^\d{3}-\d{3}$/);
+
+    // Test with mock window crypto
+    (global as any).window = {
+      crypto: {
+        getRandomValues: (arr: Uint32Array) => {
+          arr[0] = 654321;
+          return arr;
+        },
+      },
+    };
+    const windowCode = generateRoomCode();
+    expect(windowCode).toBe('654-321');
+    delete (global as any).window;
+  });
+
   it('normalizes digits with hyphen properly', () => {
     expect(normalizeRoomCode('123')).toBe('123');
     expect(normalizeRoomCode('1234')).toBe('123-4');

@@ -7,12 +7,16 @@ interface TransferProgressProps {
   stats: TransferProgressStats | null;
   manifest: FileManifest | null;
   isSender: boolean;
+  currentFileIndex?: number;
+  totalFiles?: number;
 }
 
 export const TransferProgress: React.FC<TransferProgressProps> = ({
   stats,
   manifest,
   isSender,
+  currentFileIndex,
+  totalFiles,
 }) => {
   if (!stats && !manifest) return null;
 
@@ -20,11 +24,17 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
   const fileName = manifest?.fileName ?? 'File';
   const totalSize = manifest?.fileSize ?? stats?.totalBytes ?? 0;
 
+  const batchPrefix =
+    totalFiles && totalFiles > 1
+      ? `[${(currentFileIndex ?? 0) + 1}/${totalFiles}] `
+      : '';
+
   return (
     <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 shadow-sm mt-4">
       <div className="flex items-center justify-between mb-3">
         <div className="truncate max-w-[70%]">
           <p className="text-sm font-semibold text-zinc-900 dark:text-white truncate">
+            {batchPrefix}
             {isSender ? `Sending: ${fileName}` : `Receiving: ${fileName}`}
           </p>
           <p className="text-xs text-zinc-400">

@@ -1,15 +1,29 @@
 import { Peer, DataConnection } from 'peerjs';
-import { packChunkHeader, unpackChunkHeader } from './chunkerService.js';
-import type { FileManifest, IntegrityReport } from '../../../shared/types.js';
+import {
+  packChunkHeader,
+  unpackChunkHeader,
+  packBatchChunkHeader,
+  unpackBatchChunkHeader,
+} from './chunkerService.js';
+import type {
+  FileManifest,
+  IntegrityReport,
+  BatchManifest,
+  BatchIntegrityReport,
+} from '../../../shared/types.js';
 
 export interface PeerJSServiceCallbacks {
   onReady?: (code: string) => void;
   onPeerConnected?: () => void;
   onPeerDisconnected?: () => void;
   onManifestReceived?: (manifest: FileManifest) => void;
-  onChunkReceived?: (chunkIndex: number, payload: ArrayBuffer) => void;
+  onBatchManifestReceived?: (manifest: BatchManifest) => void;
+  onChunkReceived?: (chunkIndex: number, payload: ArrayBuffer, fileIndex?: number) => void;
+  onItemComplete?: (fileIndex: number) => void;
+  onItemAck?: (fileIndex: number) => void;
   onTransferComplete?: () => void;
   onIntegrityReport?: (report: IntegrityReport) => void;
+  onBatchIntegrityReport?: (report: BatchIntegrityReport) => void;
   onError?: (err: Error) => void;
   onStatusChange?: (status: string) => void;
 }
@@ -18,6 +32,7 @@ export class PeerJSService {
   private peer: Peer | null = null;
   private conn: DataConnection | null = null;
   private callbacks: PeerJSServiceCallbacks;
+  private isBatchActive = false;
 
   constructor(callbacks: PeerJSServiceCallbacks) {
     this.callbacks = callbacks;
@@ -156,22 +171,53 @@ export class PeerJSService {
         const msg = JSON.parse(data);
         if (msg.type === 'MANIFEST') {
           this.callbacks.onManifestReceived?.(msg as FileManifest);
+        } else if (msg.type === 'BATCH_MANIFEST') {
+          this.isBatchActive = true;
+          this.callbacks.onBatchManifestReceived?.(msg as BatchManifest);
+        } else if (msg.type === 'ITEM_COMPLETE') {
+          this.callbacks.onItemComplete?.(msg.fileIndex ?? 0);
+        } else if (msg.type === 'ITEM_ACK') {
+          this.callbacks.onItemAck?.(msg.fileIndex ?? 0);
         } else if (msg.type === 'TRANSFER_COMPLETE') {
           this.callbacks.onTransferComplete?.();
         } else if (msg.type === 'INTEGRITY_REPORT') {
           this.callbacks.onIntegrityReport?.(msg as IntegrityReport);
+        } else if (msg.type === 'BATCH_INTEGRITY_REPORT') {
+          this.callbacks.onBatchIntegrityReport?.(msg as BatchIntegrityReport);
         }
       } catch (e) {
         console.error('Failed to parse signaling message', e);
       }
     } else if (data instanceof ArrayBuffer) {
       try {
-        const { chunkIndex, payload } = unpackChunkHeader(data);
-        this.callbacks.onChunkReceived?.(chunkIndex, payload);
+        if (this.isBatchActive) {
+          const { fileIndex, chunkIndex, payload } = unpackBatchChunkHeader(data);
+          this.callbacks.onChunkReceived?.(chunkIndex, payload, fileIndex);
+        } else {
+          const { chunkIndex, payload } = unpackChunkHeader(data);
+          this.callbacks.onChunkReceived?.(chunkIndex, payload, 0);
+        }
       } catch (e) {
         console.error('Failed to unpack chunk', e);
       }
     }
+  }
+
+  public sendChunk(data: ArrayBuffer): void {
+    if (!this.conn || !this.conn.open) {
+      throw new Error('P2P connection not open for sending chunk');
+    }
+    this.conn.send(data);
+  }
+
+  public sendBatchChunk(fileIndex: number, chunkIndex: number, payload: ArrayBuffer): void {
+    const packed = packBatchChunkHeader(fileIndex, chunkIndex, payload);
+    this.sendChunk(packed);
+  }
+
+  public sendItemAck(fileIndex: number): void {
+    if (!this.conn || !this.conn.open) return;
+    this.conn.send(JSON.stringify({ type: 'ITEM_ACK', fileIndex }));
   }
 
   public sendManifest(manifest: FileManifest): void {
@@ -181,9 +227,27 @@ export class PeerJSService {
     this.conn.send(JSON.stringify(manifest));
   }
 
+  public sendBatchManifest(manifest: BatchManifest): void {
+    if (!this.conn || !this.conn.open) {
+      throw new Error('P2P connection not open');
+    }
+    this.isBatchActive = true;
+    this.conn.send(JSON.stringify(manifest));
+  }
+
   public sendIntegrityReport(report: IntegrityReport): void {
     if (!this.conn || !this.conn.open) return;
     this.conn.send(JSON.stringify({ type: 'INTEGRITY_REPORT', ...report }));
+  }
+
+  public sendBatchIntegrityReport(report: BatchIntegrityReport): void {
+    if (!this.conn || !this.conn.open) return;
+    this.conn.send(JSON.stringify({ type: 'BATCH_INTEGRITY_REPORT', ...report }));
+  }
+
+  public sendItemComplete(fileIndex: number): void {
+    if (!this.conn || !this.conn.open) return;
+    this.conn.send(JSON.stringify({ type: 'ITEM_COMPLETE', fileIndex }));
   }
 
   public sendTransferComplete(): void {
@@ -229,6 +293,7 @@ export class PeerJSService {
   }
 
   public destroy(): void {
+    this.isBatchActive = false;
     if (this.conn) {
       this.conn.close();
       this.conn = null;

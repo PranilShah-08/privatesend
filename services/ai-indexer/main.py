@@ -69,7 +69,7 @@ async def health_check() -> HealthResponse:
     """Returns system health and explicitly confirms zero disk persistence."""
     return HealthResponse(
         status="healthy",
-        service="lossless-drop-ai-indexer",
+        service="privatesend-ai-indexer",
         version="1.0.0",
         zero_disk_persistence=True,
         storage_mode="volatile_ram",
@@ -85,7 +85,7 @@ async def health_check() -> HealthResponse:
 async def root_info() -> dict[str, object]:
     """Microservice root metadata and operational guarantees."""
     return {
-        "service": "lossless-drop-ai-indexer",
+        "service": "privatesend-ai-indexer",
         "version": "1.0.0",
         "description": "Privacy-first ephemeral in-memory indexing microservice using LlamaIndex",
         "zero_disk_persistence": True,

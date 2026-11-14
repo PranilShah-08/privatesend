@@ -17,6 +17,7 @@ describe('codeGenerator', () => {
   });
 
   it('normalizes room code by stripping spaces, extra hyphens, and non-digits', () => {
+    expect(normalizeRoomCode('123')).toBe('123');
     expect(normalizeRoomCode(' 123 - 456 ')).toBe('123-456');
     expect(normalizeRoomCode('123456')).toBe('123-456');
     expect(normalizeRoomCode('12-34-56')).toBe('123-456');

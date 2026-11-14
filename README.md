@@ -35,6 +35,40 @@ Anyone anywhere can use PrivateSend instantly in their browser with zero install
 
 ---
 
+## 🚀 Version 2 (v2) Additions
+
+PrivateSend Version 2 introduces advanced security, productivity, and batch features engineered with zero persistence:
+
+1. **📦 Multi-File Batch Transfer**:
+   - Send multiple files simultaneously in an organized queue.
+   - Comprehensive `BatchManifest` tracking file indices, individual hashes, and batch bytes.
+   - Per-file SHA-256 verification badges and individual download buttons.
+
+2. **🔐 Room Code Hardware-Accelerated E2EE (AES-256-GCM)**:
+   - Web Crypto API PBKDF2 with 100,000 iterations of SHA-256 deriving 256-bit AES-GCM keys from the room code.
+   - Deterministic 96-bit IV per chunk index ensures replay protection and authenticated encryption.
+   - Zero keys or salts persisted to localStorage or session storage.
+
+3. **📱 QR Code Room Pairing**:
+   - Receiver screen features a 1-click minimalist QR Code modal (`#code=XXX-XXX`).
+   - Senders on mobile or tablet can scan to pair instantly without typing the code.
+
+4. **🤖 Ephemeral AI Document Inspector**:
+   - Built on Python FastAPI and LlamaIndex (`services/ai-indexer`).
+   - Indexes received documents purely in volatile RAM (`tmpfs`), generates executive summaries, key topics, and answers natural language questions grounded in document content.
+   - Instant zero-trace cleanup when the drawer closes.
+
+5. **🚨 Emergency Memory Sanitization ("Panic Button")**:
+   - Two-stage confirmation shield button for immediate RAM wipe.
+   - In-place zeroization of WebRTC `ArrayBuffer` allocations (`view.fill(0)`).
+   - Revocation of all active `Blob` object URLs and teardown of peer connections.
+
+6. **🦀 Rust Core v0.2.0 Batch Engine**:
+   - CLI commands `hash-batch <files...>` and `slice-batch <files...> --output-dir <dir>` returning structured JSON manifests.
+   - Guaranteed `SecureBuffer` zeroization on drop for all batch chunk slicing operations.
+
+---
+
 ## Architecture Overview
 
 ```

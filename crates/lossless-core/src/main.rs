@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 use lossless_core::{
-    hash_file, verify_file, ChunkReassembler, SecureBuffer, StreamingChunker, DEFAULT_CHUNK_SIZE,
+    hash_file, verify_file, BatchHasher, ChunkReassembler, MultiFileSlicer, SecureBuffer,
+    StreamingChunker, DEFAULT_CHUNK_SIZE,
 };
 use std::fs::{self, File};
 use std::io::{self, BufReader, BufWriter, Write};
@@ -62,6 +63,28 @@ enum Commands {
         /// Total expected chunks count
         #[arg(short, long)]
         total: Option<u32>,
+    },
+
+    /// Computes streaming bit-for-bit SHA-256 digests for multiple files (outputs JSON array)
+    HashBatch {
+        /// File paths to hash
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+    },
+
+    /// Batch slices multiple files into WebRTC chunks in an output directory (outputs JSON report)
+    SliceBatch {
+        /// File paths to slice
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+
+        /// Directory where chunks will be written
+        #[arg(short, long)]
+        output_dir: PathBuf,
+
+        /// Optional custom chunk size in bytes (defaults to 65536 = 64KB)
+        #[arg(short, long, default_value_t = DEFAULT_CHUNK_SIZE)]
+        chunk_size: usize,
     },
 }
 
@@ -188,6 +211,25 @@ fn execute(cmd: Commands) -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
 
+            Ok(())
+        }
+
+        Commands::HashBatch { files } => {
+            let entries = BatchHasher::hash_files(&files)?;
+            let json = serde_json::to_string_pretty(&entries)?;
+            println!("{}", json);
+            Ok(())
+        }
+
+        Commands::SliceBatch {
+            files,
+            output_dir,
+            chunk_size,
+        } => {
+            let slicer = MultiFileSlicer::new(chunk_size);
+            let report = slicer.slice_files_to_dir(&files, &output_dir)?;
+            let json = serde_json::to_string_pretty(&report)?;
+            println!("{}", json);
             Ok(())
         }
     }

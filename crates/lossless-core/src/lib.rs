@@ -12,6 +12,7 @@
 //! - **Zero-Copy Architecture**: Chunk slicing and header extraction borrow
 //!   slices directly without copying buffers.
 
+pub mod batch;
 pub mod buffer;
 pub mod chunker;
 pub mod error;
@@ -19,6 +20,9 @@ pub mod hasher;
 pub mod protocol;
 pub mod reassembler;
 
+pub use batch::{
+    BatchFileSummary, BatchHashEntry, BatchHasher, BatchSliceReport, MultiFileChunk, MultiFileSlicer,
+};
 pub use buffer::SecureBuffer;
 pub use chunker::{
     pack_chunk, slice_buffer, unpack_chunk, ChunkView, StreamingChunker, ZeroCopyChunkSlicer,

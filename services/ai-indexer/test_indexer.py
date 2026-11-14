@@ -59,7 +59,7 @@ def test_root_endpoint_metadata(client: TestClient) -> None:
     assert response.status_code == 200
     data = response.json()
     assert data["zero_disk_persistence"] is True
-    assert data["service"] == "lossless-drop-ai-indexer"
+    assert data["service"] == "privatesend-ai-indexer"
     assert data["retention_policy"] == "zero-retention-ephemeral-ram"
 
 

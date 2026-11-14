@@ -29,12 +29,17 @@ describe('SpeedCalculator', () => {
     calc.start(totalBytes, baseTime);
 
     // Simulate transfer: 2MB transferred 1 second later
-    const stats = calc.update(2 * 1024 * 1024, baseTime + 1000);
+    const stats1 = calc.update(2 * 1024 * 1024, baseTime + 1000);
 
-    expect(stats.percentage).toBe(20);
-    expect(stats.bytesTransferred).toBe(2 * 1024 * 1024);
-    expect(stats.speedBps).toBeGreaterThan(0);
-    expect(stats.speedFormatted).toContain('/s');
-    expect(stats.etaSeconds).toBeGreaterThan(0);
+    expect(stats1.percentage).toBe(20);
+    expect(stats1.bytesTransferred).toBe(2 * 1024 * 1024);
+    expect(stats1.speedBps).toBeGreaterThan(0);
+    expect(stats1.speedFormatted).toContain('/s');
+    expect(stats1.etaSeconds).toBeGreaterThan(0);
+
+    // Second update exercises EMA smoothing
+    const stats2 = calc.update(5 * 1024 * 1024, baseTime + 2000);
+    expect(stats2.percentage).toBe(50);
+    expect(stats2.speedBps).toBeGreaterThan(0);
   });
 });

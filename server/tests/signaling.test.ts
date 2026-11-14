@@ -243,4 +243,42 @@ describe('Signaling Server Integration', () => {
     await new Promise((r) => setTimeout(r, 50));
     client.disconnect();
   });
+
+  it('rejects invalid non-string room code and rate-limited attempts', async () => {
+    const client = ioc(`http://localhost:${port}`) as ClientSocket<ServerToClientEvents, ClientToServerEvents>;
+
+    await new Promise<void>((resolve) => {
+      client.on('connect', () => resolve());
+    });
+
+    const errorPromise = new Promise<{ code: string; message: string }>((resolve) => {
+      client.on('error', (err) => resolve(err));
+    });
+
+    client.emit('room:join', { code: null as any });
+    const err = await errorPromise;
+    expect(err.code).toBe('INVALID_INPUT');
+
+    // Trigger rate limiting on rateLimiter
+    const rateLimitClient = ioc(`http://localhost:${port}`, {
+      extraHeaders: {
+        'x-forwarded-for': '1.2.3.4',
+      },
+    }) as ClientSocket<ServerToClientEvents, ClientToServerEvents>;
+
+    for (let i = 0; i < 6; i++) {
+      rateLimiter.recordFailure('1.2.3.4');
+    }
+
+    const rateLimitErrorPromise = new Promise<{ code: string; message: string }>((resolve) => {
+      rateLimitClient.on('error', (err) => resolve(err));
+    });
+
+    rateLimitClient.emit('room:join', { code: '111-222' });
+    const rateLimitErr = await rateLimitErrorPromise;
+    expect(rateLimitErr.code).toBe('RATE_LIMITED');
+
+    client.disconnect();
+    rateLimitClient.disconnect();
+  });
 });

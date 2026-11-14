@@ -1,14 +1,14 @@
 import React, { useState, useRef } from 'react';
-import { ArrowRight, FileUp, File as FileIcon, X, CheckCircle2 } from 'lucide-react';
+import { ArrowRight, FileUp, File as FileIcon, X, CheckCircle2, Lock } from 'lucide-react';
 import { formatBytes } from '../services/speedCalculator.js';
 import { normalizeRoomCode } from '../utils/codeValidator.js';
 
 interface SenderCardProps {
   peerConnected: boolean;
   onJoinRoom: (code: string) => void;
-  selectedFile: File | null;
-  onSelectFile: (file: File | null) => void;
-  onSendFile: () => void;
+  selectedFiles: File[];
+  onSelectFiles: (files: File[]) => void;
+  onSendFiles: (enableE2EE: boolean) => void;
   isTransferring: boolean;
   errorText: string | null;
 }
@@ -16,14 +16,15 @@ interface SenderCardProps {
 export const SenderCard: React.FC<SenderCardProps> = ({
   peerConnected,
   onJoinRoom,
-  selectedFile,
-  onSelectFile,
-  onSendFile,
+  selectedFiles,
+  onSelectFiles,
+  onSendFiles,
   isTransferring,
   errorText,
 }) => {
   const [code, setCode] = useState('');
   const [isDragging, setIsDragging] = useState(false);
+  const [enableE2EE, setEnableE2EE] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -50,10 +51,27 @@ export const SenderCard: React.FC<SenderCardProps> = ({
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      onSelectFile(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const newFiles = Array.from(e.dataTransfer.files);
+      onSelectFiles([...selectedFiles, ...newFiles]);
     }
   };
+
+  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const newFiles = Array.from(e.target.files);
+      onSelectFiles([...selectedFiles, ...newFiles]);
+    }
+    // Reset file input so user can pick same file again if desired
+    e.target.value = '';
+  };
+
+  const removeFile = (index: number) => {
+    const updated = selectedFiles.filter((_, i) => i !== index);
+    onSelectFiles(updated);
+  };
+
+  const totalBytes = selectedFiles.reduce((acc, f) => acc + f.size, 0);
 
   return (
     <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 sm:p-8 shadow-sm">
@@ -71,7 +89,7 @@ export const SenderCard: React.FC<SenderCardProps> = ({
               maxLength={7}
               value={code}
               onChange={handleCodeChange}
-              className="w-full text-center font-mono text-3xl sm:text-4xl font-bold tracking-widest py-3 px-4 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white transition-all placeholder:text-zinc-300 dark:placeholder:text-zinc-600"
+              className="w-full text-center font-mono text-3xl sm:text-4xl font-bold tracking-widest py-3 px-4 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60 text-zinc-900 dark:white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white transition-all placeholder:text-zinc-300 dark:placeholder:text-zinc-600"
             />
           </div>
 
@@ -102,7 +120,30 @@ export const SenderCard: React.FC<SenderCardProps> = ({
             <span className="text-xs font-mono text-zinc-400">Room: {code}</span>
           </div>
 
-          {!selectedFile ? (
+          {/* E2EE Toggle */}
+          <div className="flex items-center justify-between p-3 mb-4 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-800/40">
+            <div className="flex items-center gap-2">
+              <Lock className="w-4 h-4 text-emerald-500" />
+              <div>
+                <span className="text-xs font-medium text-zinc-800 dark:text-zinc-200">
+                  AES-256-GCM Encryption
+                </span>
+                <p className="text-[11px] text-zinc-400">Derived from room code • Zero keys stored</p>
+              </div>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={enableE2EE}
+                onChange={(e) => setEnableE2EE(e.target.checked)}
+                disabled={isTransferring}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-zinc-300 peer-focus:outline-none rounded-full peer dark:bg-zinc-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-zinc-600 peer-checked:bg-zinc-900 dark:peer-checked:bg-white"></div>
+            </label>
+          </div>
+
+          {selectedFiles.length === 0 ? (
             <div
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
@@ -117,56 +158,88 @@ export const SenderCard: React.FC<SenderCardProps> = ({
               <input
                 ref={fileInputRef}
                 type="file"
+                multiple
                 className="hidden"
-                onChange={(e) => {
-                  if (e.target.files && e.target.files[0]) {
-                    onSelectFile(e.target.files[0]);
-                  }
-                }}
+                onChange={handleFileInput}
               />
               <FileUp className="w-8 h-8 mx-auto mb-3 text-zinc-400" />
               <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
-                Drag and drop your file here, or click to browse
+                Drag and drop files here, or click to browse
               </p>
               <p className="text-xs text-zinc-400 mt-1">
-                Any size • Any format • 100% Lossless
+                Multi-file batch • Any size • 100% Bit-for-bit lossless
               </p>
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="flex items-center justify-between p-4 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/50">
-                <div className="flex items-center gap-3 overflow-hidden">
-                  <div className="p-2.5 rounded-lg bg-zinc-200/60 dark:bg-zinc-700/60 text-zinc-700 dark:text-zinc-200">
-                    <FileIcon className="w-5 h-5" />
-                  </div>
-                  <div className="overflow-hidden">
-                    <p className="text-sm font-medium text-zinc-900 dark:text-white truncate">
-                      {selectedFile.name}
-                    </p>
-                    <p className="text-xs text-zinc-400">
-                      {formatBytes(selectedFile.size)} • {selectedFile.type || 'Binary file'}
-                    </p>
-                  </div>
-                </div>
-
+              {/* File Queue List */}
+              <div className="flex items-center justify-between text-xs text-zinc-400 font-medium px-1">
+                <span>
+                  {selectedFiles.length} {selectedFiles.length === 1 ? 'file' : 'files'} selected (
+                  {formatBytes(totalBytes)})
+                </span>
                 {!isTransferring && (
                   <button
                     type="button"
-                    onClick={() => onSelectFile(null)}
-                    className="p-1 rounded-lg hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-400 hover:text-zinc-700 transition-colors"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="text-zinc-900 dark:text-zinc-100 hover:underline"
                   >
-                    <X className="w-4 h-4" />
+                    + Add more
                   </button>
                 )}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={handleFileInput}
+                />
+              </div>
+
+              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                {selectedFiles.map((file, idx) => (
+                  <div
+                    key={`${file.name}-${idx}`}
+                    className="flex items-center justify-between p-3 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/50"
+                  >
+                    <div className="flex items-center gap-3 overflow-hidden">
+                      <div className="p-2 rounded-lg bg-zinc-200/60 dark:bg-zinc-700/60 text-zinc-700 dark:text-zinc-200">
+                        <FileIcon className="w-4 h-4" />
+                      </div>
+                      <div className="overflow-hidden">
+                        <p className="text-xs font-medium text-zinc-900 dark:text-white truncate">
+                          {file.name}
+                        </p>
+                        <p className="text-[11px] text-zinc-400">
+                          {formatBytes(file.size)} • {file.type || 'binary'}
+                        </p>
+                      </div>
+                    </div>
+
+                    {!isTransferring && (
+                      <button
+                        type="button"
+                        onClick={() => removeFile(idx)}
+                        className="p-1 rounded-lg hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-400 hover:text-zinc-700 transition-colors"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
 
               <button
                 type="button"
-                disabled={isTransferring}
-                onClick={onSendFile}
+                disabled={isTransferring || selectedFiles.length === 0}
+                onClick={() => onSendFiles(enableE2EE)}
                 className="w-full flex items-center justify-center gap-2 py-3 px-6 rounded-xl font-medium text-sm text-white bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
               >
-                <span>{isTransferring ? 'Transferring...' : 'Send File Losslessly'}</span>
+                <span>
+                  {isTransferring
+                    ? 'Transferring...'
+                    : `Send ${selectedFiles.length > 1 ? `${selectedFiles.length} Files` : 'File'} Losslessly`}
+                </span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>

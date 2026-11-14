@@ -37,4 +37,13 @@ describe('SlidingRateLimiter', () => {
     limiter.recordSuccess(ip);
     expect(limiter.check(ip)).toBe(true);
   });
+
+  it('prunes expired entries and lockouts properly', () => {
+    const ip = '10.0.0.1';
+    limiter.recordFailure(ip);
+    limiter.prune();
+    expect(limiter.check(ip)).toBe(true);
+
+    limiter.destroy();
+  });
 });

@@ -1,6 +1,6 @@
 [package]
 name = "lossless-core"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["PrivateSend Team"]
 description = "High-performance streaming SHA-256 verifier and zero-copy chunk slicer with zero retention"

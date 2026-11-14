@@ -15,6 +15,10 @@ export default defineConfig({
         'server/src/signalingHandler.ts',
         'client/src/services/chunkerService.ts',
         'client/src/services/speedCalculator.ts',
+        'client/src/services/encryptionService.ts',
+        'client/src/services/panicWipeService.ts',
+        'client/src/services/qrCodeService.ts',
+        'client/src/services/aiInspectorService.ts',
         'client/src/utils/**',
       ],
       thresholds: {

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Copy, Check, RefreshCw, Radio } from 'lucide-react';
+import { Copy, Check, RefreshCw, Radio, QrCode } from 'lucide-react';
+import { QRCodeModal } from './QRCodeModal.js';
 import type { ConnectionMode } from '../../../shared/types.js';
 
 interface ReceiverCardProps {
@@ -16,6 +17,7 @@ export const ReceiverCard: React.FC<ReceiverCardProps> = ({
   onRefresh,
 }) => {
   const [copied, setCopied] = useState(false);
+  const [showQr, setShowQr] = useState(false);
 
   const handleCopy = () => {
     if (!roomCode) return;
@@ -36,18 +38,29 @@ export const ReceiverCard: React.FC<ReceiverCardProps> = ({
             <span className="font-mono text-4xl sm:text-5xl font-bold tracking-widest text-zinc-900 dark:text-white select-all">
               {roomCode}
             </span>
-            <button
-              type="button"
-              onClick={handleCopy}
-              title="Copy Room Code"
-              className="p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 transition-colors"
-            >
-              {copied ? (
-                <Check className="w-5 h-5 text-emerald-500" />
-              ) : (
-                <Copy className="w-5 h-5" />
-              )}
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={handleCopy}
+                title="Copy Room Code"
+                className="p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 transition-colors"
+              >
+                {copied ? (
+                  <Check className="w-5 h-5 text-emerald-500" />
+                ) : (
+                  <Copy className="w-5 h-5" />
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowQr(true)}
+                title="Show QR Code"
+                className="p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 transition-colors"
+              >
+                <QrCode className="w-5 h-5" />
+              </button>
+            </div>
           </div>
         ) : (
           <div className="flex items-center justify-center gap-2 py-4 text-zinc-400">
@@ -69,7 +82,7 @@ export const ReceiverCard: React.FC<ReceiverCardProps> = ({
         ) : (
           <div className="flex items-center gap-2 text-zinc-500 dark:text-zinc-400">
             <Radio className="w-4 h-4 animate-pulse text-zinc-400" />
-            <span>Share this code with the sender. Waiting for connection...</span>
+            <span>Share code or scan QR. Waiting for connection...</span>
           </div>
         )}
       </div>
@@ -84,6 +97,12 @@ export const ReceiverCard: React.FC<ReceiverCardProps> = ({
           <span>Generate new code</span>
         </button>
       </div>
+
+      <QRCodeModal
+        roomCode={roomCode}
+        isOpen={showQr}
+        onClose={() => setShowQr(false)}
+      />
     </div>
   );
 };

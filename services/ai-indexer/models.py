@@ -99,7 +99,7 @@ class IndexEphemeralResponse(BaseModel):
 class HealthResponse(BaseModel):
     """Health check response confirming zero disk persistence."""
     status: str = Field(default="healthy")
-    service: str = Field(default="lossless-drop-ai-indexer")
+    service: str = Field(default="privatesend-ai-indexer")
     version: str = Field(default="1.0.0")
     zero_disk_persistence: bool = Field(
         default=True,
