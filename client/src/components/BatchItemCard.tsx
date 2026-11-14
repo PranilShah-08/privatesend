@@ -16,6 +16,7 @@ export interface BatchItemState {
   fileName: string;
   fileSize: number;
   fileType: string;
+  relativePath?: string;
   status: 'pending' | 'hashing' | 'transferring' | 'verifying' | 'completed' | 'error';
   progressPercentage: number;
   integrityReport?: IntegrityReport;
@@ -60,6 +61,11 @@ export const BatchItemCard: React.FC<BatchItemCardProps> = ({ item, onInspectAI 
             <p className="text-xs font-semibold text-zinc-900 dark:text-white truncate">
               {item.fileName}
             </p>
+            {item.relativePath && item.relativePath !== item.fileName && (
+              <p className="text-[10px] font-mono text-zinc-400 dark:text-zinc-500 truncate">
+                {item.relativePath}
+              </p>
+            )}
             <p className="text-[11px] text-zinc-400">
               {formatBytes(item.fileSize)} •{' '}
               {item.fileType ? item.fileType.split('/')[1] || item.fileType : 'binary'}

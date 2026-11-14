@@ -90,4 +90,31 @@ describe('RoomManager', () => {
 
     expect(shortTtlManager.getRoom(room.code)).toBeUndefined();
   });
+
+  it('supports 1-to-many broadcast rooms with multiple receivers', () => {
+    const broadcastRoom = manager.createRoom('host-sender-sock', 'broadcast');
+    expect(broadcastRoom.type).toBe('broadcast');
+
+    const join1 = manager.joinRoom(broadcastRoom.code, 'receiver-1');
+    expect(join1.success).toBe(true);
+
+    const join2 = manager.joinRoom(broadcastRoom.code, 'receiver-2');
+    expect(join2.success).toBe(true);
+
+    const room = manager.getRoom(broadcastRoom.code);
+    expect(room?.receiverSocketIds).toContain('receiver-1');
+    expect(room?.receiverSocketIds).toContain('receiver-2');
+
+    // Individual receiver disconnects without destroying room
+    const receiverLeft = manager.handleDisconnect('receiver-1');
+    expect(receiverLeft?.peerSocketId).toBe('host-sender-sock');
+    expect(manager.getRoom(broadcastRoom.code)).toBeDefined();
+    expect(manager.getRoom(broadcastRoom.code)?.receiverSocketIds).not.toContain('receiver-1');
+    expect(manager.getRoom(broadcastRoom.code)?.receiverSocketIds).toContain('receiver-2');
+
+    // Host disconnects -> destroys room and notifies remaining receivers
+    const hostLeft = manager.handleDisconnect('host-sender-sock');
+    expect(hostLeft?.peerSocketIds).toContain('receiver-2');
+    expect(manager.getRoom(broadcastRoom.code)).toBeUndefined();
+  });
 });

@@ -2,10 +2,14 @@ export type ParticipantRole = 'receiver' | 'sender';
 
 export type RoomStatus = 'waiting' | 'locked' | 'transferring' | 'completed' | 'closed';
 
+export type RoomType = 'direct' | 'broadcast';
+
 export interface RoomInfo {
   code: string;
   receiverSocketId: string;
   senderSocketId?: string;
+  type?: RoomType;
+  receiverSocketIds?: string[];
   createdAt: number;
   expiresAt: number;
   status: RoomStatus;
@@ -49,6 +53,7 @@ export type ConnectionMode = 'p2p-webrtc' | 'fallback-relay';
 // Version 2: Multi-File Batch Transfer Contracts
 export interface BatchItemManifest extends FileManifest {
   fileIndex: number;
+  relativePath?: string;
 }
 
 export interface BatchManifest {
@@ -59,6 +64,8 @@ export interface BatchManifest {
   encrypted: boolean;
   saltHex?: string;
   batchNonce?: number;
+  isFolder?: boolean;
+  folderName?: string;
   files: BatchItemManifest[];
 }
 
@@ -80,10 +87,14 @@ export interface BatchProgressStats {
 export interface BatchIntegrityReport {
   batchId: string;
   totalFiles: number;
+  isFolder?: boolean;
+  folderName?: string;
+  zipBlobUrl?: string | null;
   items: Array<{
     fileId: string;
     fileName: string;
     fileSize: number;
+    relativePath?: string;
     senderSha256: string;
     receiverSha256: string;
     isMatch: boolean;
@@ -91,6 +102,34 @@ export interface BatchIntegrityReport {
   }>;
   allMatched: boolean;
   timestamp: number;
+}
+
+// Version 2.1: Local Wi-Fi Presence & Consent Contracts
+export interface NearbyPeer {
+  socketId: string;
+  peerId: string;
+  deviceName: string;
+  joinedAt: number;
+}
+
+export interface TransferConsentRequest {
+  requestId: string;
+  senderSocketId: string;
+  senderDeviceName: string;
+  senderPeerId: string;
+  fileCount: number;
+  totalBytes: number;
+  isFolder?: boolean;
+  folderName?: string;
+  firstFileName: string;
+}
+
+export interface TransferConsentResponse {
+  requestId: string;
+  senderSocketId: string;
+  receiverSocketId: string;
+  receiverPeerId: string;
+  accepted: boolean;
 }
 
 // Version 2: Ephemeral In-Memory AI Document Inspector
@@ -116,8 +155,8 @@ export interface AIInspectResponse {
 
 // Socket.io Events
 export interface ServerToClientEvents {
-  'room:created': (data: { code: string; expiresAt: number }) => void;
-  'room:joined': (data: { code: string; role: ParticipantRole }) => void;
+  'room:created': (data: { code: string; expiresAt: number; type?: RoomType }) => void;
+  'room:joined': (data: { code: string; role: ParticipantRole; type?: RoomType }) => void;
   'peer:connected': (data: { role: ParticipantRole }) => void;
   'peer:disconnected': (data: { reason: string }) => void;
   'webrtc:offer': (data: { sdp: any }) => void;
@@ -130,6 +169,14 @@ export interface ServerToClientEvents {
   'relay:integrity': (data: IntegrityReport) => void;
   'relay:batch-integrity': (data: BatchIntegrityReport) => void;
   'error': (data: { message: string; code: string }) => void;
+
+  // Local Wi-Fi & Multi-Receiver Events
+  'local:peers-updated': (peers: NearbyPeer[]) => void;
+  'local:incoming-request': (req: TransferConsentRequest) => void;
+  'local:request-declined': (data: { reason: string; requestId?: string }) => void;
+  'local:request-accepted': (data: { receiverPeerId: string; requestId: string }) => void;
+  'broadcast:receiver-joined': (data: { code: string; receiverCount: number; socketId: string }) => void;
+  'broadcast:receiver-left': (data: { code: string; receiverCount: number; socketId: string }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -145,4 +192,25 @@ export interface ClientToServerEvents {
   'relay:integrity': (data: { code: string; report: IntegrityReport }) => void;
   'relay:batch-integrity': (data: { code: string; report: BatchIntegrityReport }) => void;
   'room:leave': () => void;
+
+  // Local Wi-Fi & Multi-Receiver Events
+  'local:announce': (data: { deviceName: string; peerId: string }) => void;
+  'local:request-transfer': (req: {
+    targetSocketId: string;
+    senderDeviceName: string;
+    senderPeerId: string;
+    fileCount: number;
+    totalBytes: number;
+    isFolder?: boolean;
+    folderName?: string;
+    firstFileName: string;
+  }) => void;
+  'local:respond-transfer': (res: {
+    requestId: string;
+    senderSocketId: string;
+    accepted: boolean;
+    receiverPeerId?: string;
+  }) => void;
+  'broadcast:create': () => void;
+  'broadcast:join': (data: { code: string }) => void;
 }

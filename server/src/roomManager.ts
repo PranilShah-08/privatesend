@@ -1,5 +1,5 @@
 import { generateRoomCode } from './utils/codeGenerator.js';
-import type { RoomInfo, RoomStatus } from '../../shared/types.js';
+import type { RoomInfo, RoomStatus, RoomType } from '../../shared/types.js';
 
 export interface RoomManagerOptions {
   ttlMs?: number;
@@ -15,6 +15,7 @@ export interface JoinRoomResult {
 export interface DisconnectResult {
   code: string;
   peerSocketId?: string;
+  peerSocketIds?: string[];
   role: 'receiver' | 'sender';
 }
 
@@ -28,11 +29,11 @@ export class RoomManager {
   }
 
   /**
-   * Creates an ephemeral room assigned to the receiver socket
+   * Creates an ephemeral room assigned to the host socket (either 1-to-1 direct or 1-to-many broadcast)
    */
-  public createRoom(receiverSocketId: string): RoomInfo {
+  public createRoom(hostSocketId: string, type: RoomType = 'direct'): RoomInfo {
     // Clean up any existing room this socket had
-    this.handleDisconnect(receiverSocketId);
+    this.handleDisconnect(hostSocketId);
 
     let code = generateRoomCode();
     while (this.rooms.has(code)) {
@@ -40,24 +41,28 @@ export class RoomManager {
     }
 
     const now = Date.now();
+    const isBroadcast = type === 'broadcast';
+
     const room: RoomInfo = {
       code,
-      receiverSocketId,
+      receiverSocketId: hostSocketId,
+      type,
+      receiverSocketIds: isBroadcast ? [] : undefined,
       createdAt: now,
       expiresAt: now + this.ttlMs,
       status: 'waiting',
     };
 
     this.rooms.set(code, room);
-    this.socketToRoom.set(receiverSocketId, { code, role: 'receiver' });
+    this.socketToRoom.set(hostSocketId, { code, role: isBroadcast ? 'sender' : 'receiver' });
 
     return room;
   }
 
   /**
-   * Allows exactly one sender to join the room, locking it immediately
+   * Allows joining a room. For direct rooms, locks on first sender. For broadcast rooms, allows multiple receivers.
    */
-  public joinRoom(code: string, senderSocketId: string): JoinRoomResult {
+  public joinRoom(code: string, socketId: string): JoinRoomResult {
     const room = this.rooms.get(code);
 
     if (!room) {
@@ -77,6 +82,19 @@ export class RoomManager {
       };
     }
 
+    if (room.type === 'broadcast') {
+      room.receiverSocketIds = room.receiverSocketIds || [];
+      if (!room.receiverSocketIds.includes(socketId)) {
+        room.receiverSocketIds.push(socketId);
+      }
+      this.socketToRoom.set(socketId, { code, role: 'receiver' });
+      return {
+        success: true,
+        room,
+      };
+    }
+
+    // Direct 1-to-1 room logic
     if (room.status !== 'waiting' || room.senderSocketId) {
       return {
         success: false,
@@ -85,11 +103,9 @@ export class RoomManager {
       };
     }
 
-    // Lock room strictly for these two parties
-    room.senderSocketId = senderSocketId;
+    room.senderSocketId = socketId;
     room.status = 'locked';
-
-    this.socketToRoom.set(senderSocketId, { code, role: 'sender' });
+    this.socketToRoom.set(socketId, { code, role: 'sender' });
 
     return {
       success: true,
@@ -118,6 +134,31 @@ export class RoomManager {
     const { code, role } = mapping;
     const room = this.rooms.get(code);
 
+    if (room?.type === 'broadcast') {
+      const isHost = socketId === room.receiverSocketId;
+      if (isHost) {
+        const remainingPeers = [...(room.receiverSocketIds || [])];
+        this.destroyRoom(code);
+        return {
+          code,
+          peerSocketIds: remainingPeers,
+          role: 'sender',
+        };
+      } else {
+        // A single receiver left
+        if (room.receiverSocketIds) {
+          room.receiverSocketIds = room.receiverSocketIds.filter((id) => id !== socketId);
+        }
+        this.socketToRoom.delete(socketId);
+        return {
+          code,
+          peerSocketId: room.receiverSocketId,
+          role: 'receiver',
+        };
+      }
+    }
+
+    // Direct 1-to-1 room
     let peerSocketId: string | undefined;
     if (room) {
       peerSocketId = role === 'receiver' ? room.senderSocketId : room.receiverSocketId;
@@ -137,6 +178,11 @@ export class RoomManager {
       this.socketToRoom.delete(room.receiverSocketId);
       if (room.senderSocketId) {
         this.socketToRoom.delete(room.senderSocketId);
+      }
+      if (room.receiverSocketIds) {
+        for (const id of room.receiverSocketIds) {
+          this.socketToRoom.delete(id);
+        }
       }
       this.rooms.delete(code);
     }

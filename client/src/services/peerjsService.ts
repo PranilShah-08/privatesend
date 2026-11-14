@@ -1,6 +1,5 @@
 import { Peer, DataConnection } from 'peerjs';
 import {
-  packChunkHeader,
   unpackChunkHeader,
   packBatchChunkHeader,
   unpackBatchChunkHeader,
@@ -14,8 +13,8 @@ import type {
 
 export interface PeerJSServiceCallbacks {
   onReady?: (code: string) => void;
-  onPeerConnected?: () => void;
-  onPeerDisconnected?: () => void;
+  onPeerConnected?: (peerId?: string) => void;
+  onPeerDisconnected?: (peerId?: string) => void;
   onManifestReceived?: (manifest: FileManifest) => void;
   onBatchManifestReceived?: (manifest: BatchManifest) => void;
   onChunkReceived?: (chunkIndex: number, payload: ArrayBuffer, fileIndex?: number) => void;
@@ -31,18 +30,21 @@ export interface PeerJSServiceCallbacks {
 export class PeerJSService {
   private peer: Peer | null = null;
   private conn: DataConnection | null = null;
+  private connections = new Map<string, DataConnection>();
   private callbacks: PeerJSServiceCallbacks;
   private isBatchActive = false;
+  private isBroadcast = false;
 
   constructor(callbacks: PeerJSServiceCallbacks) {
     this.callbacks = callbacks;
   }
 
   /**
-   * Initializes Receiver mode: claims the 6-digit room code on PeerJS cloud
+   * Initializes Receiver mode: claims the 6-digit room code on PeerJS cloud (1-to-1)
    */
   public initReceiver(roomCode: string): Promise<string> {
     this.destroy();
+    this.isBroadcast = false;
     const peerId = this.formatPeerId(roomCode);
 
     return new Promise((resolve, reject) => {
@@ -68,16 +70,13 @@ export class PeerJSService {
         // Enforce strict 1-to-1 exclusivity: accept first sender, reject subsequent peers
         peer.on('connection', (incomingConn) => {
           if (this.conn && this.conn.open) {
-            // Already connected to a sender; reject 3rd party
             incomingConn.close();
             return;
           }
-
           this.setupConnection(incomingConn);
         });
 
         peer.on('error', (err: any) => {
-          // If code collision occurs, inform caller to regenerate
           if (err.type === 'unavailable-id') {
             reject(new Error('ROOM_CODE_TAKEN'));
           } else {
@@ -92,7 +91,54 @@ export class PeerJSService {
   }
 
   /**
-   * Initializes Sender mode: connects to the receiver's 6-digit room code
+   * Initializes Broadcast Host mode: claims room code and accepts multiple receivers concurrently (1-to-Many)
+   */
+  public initBroadcastHost(roomCode: string): Promise<string> {
+    this.destroy();
+    this.isBroadcast = true;
+    const peerId = this.formatPeerId(roomCode);
+
+    return new Promise((resolve, reject) => {
+      try {
+        const peer = new Peer(peerId, {
+          debug: 1,
+          config: {
+            iceServers: [
+              { urls: 'stun:stun.l.google.com:19302' },
+              { urls: 'stun:global.stun.twilio.com:3478' },
+            ],
+          },
+        });
+
+        this.peer = peer;
+
+        peer.on('open', (id) => {
+          this.callbacks.onStatusChange?.('Broadcast room ready. Waiting for receivers...');
+          this.callbacks.onReady?.(roomCode);
+          resolve(id);
+        });
+
+        // Accept all incoming receivers in broadcast session
+        peer.on('connection', (incomingConn) => {
+          this.setupConnection(incomingConn);
+        });
+
+        peer.on('error', (err: any) => {
+          if (err.type === 'unavailable-id') {
+            reject(new Error('ROOM_CODE_TAKEN'));
+          } else {
+            this.callbacks.onError?.(err);
+            reject(err);
+          }
+        });
+      } catch (err: any) {
+        reject(err);
+      }
+    });
+  }
+
+  /**
+   * Initializes Sender or Receiver client: connects to target room code
    */
   public connectToReceiver(roomCode: string): Promise<void> {
     this.destroy();
@@ -100,7 +146,6 @@ export class PeerJSService {
 
     return new Promise((resolve, reject) => {
       try {
-        // Ephemeral sender peer ID
         const peer = new Peer({
           debug: 1,
           config: {
@@ -114,7 +159,7 @@ export class PeerJSService {
         this.peer = peer;
 
         peer.on('open', () => {
-          this.callbacks.onStatusChange?.('Connecting to receiver...');
+          this.callbacks.onStatusChange?.('Connecting to peer...');
           const conn = peer.connect(targetPeerId, {
             reliable: true,
           });
@@ -128,7 +173,7 @@ export class PeerJSService {
 
         peer.on('error', (err: any) => {
           if (err.type === 'peer-unavailable') {
-            const friendlyErr = new Error('Receiver not found. Check the room code.');
+            const friendlyErr = new Error('Peer not found. Check the room code.');
             this.callbacks.onError?.(friendlyErr);
             reject(friendlyErr);
           } else {
@@ -144,10 +189,16 @@ export class PeerJSService {
 
   private setupConnection(conn: DataConnection) {
     this.conn = conn;
+    this.connections.set(conn.peer, conn);
 
     conn.on('open', () => {
-      this.callbacks.onPeerConnected?.();
-      this.callbacks.onStatusChange?.('Direct P2P Encrypted Channel Ready');
+      this.callbacks.onPeerConnected?.(conn.peer);
+      const count = this.connections.size;
+      const status =
+        this.isBroadcast && count > 1
+          ? `Broadcasting to ${count} connected peers`
+          : 'Direct P2P Encrypted Channel Ready';
+      this.callbacks.onStatusChange?.(status);
     });
 
     conn.on('data', (raw: any) => {
@@ -155,9 +206,15 @@ export class PeerJSService {
     });
 
     conn.on('close', () => {
-      this.callbacks.onPeerDisconnected?.();
-      this.callbacks.onStatusChange?.('Peer disconnected');
-      this.conn = null;
+      this.connections.delete(conn.peer);
+      this.callbacks.onPeerDisconnected?.(conn.peer);
+
+      if (this.connections.size === 0) {
+        this.conn = null;
+        this.callbacks.onStatusChange?.('Peer disconnected');
+      } else {
+        this.callbacks.onStatusChange?.(`Broadcasting to ${this.connections.size} connected peers`);
+      }
     });
 
     conn.on('error', (err) => {
@@ -204,10 +261,14 @@ export class PeerJSService {
   }
 
   public sendChunk(data: ArrayBuffer): void {
-    if (!this.conn || !this.conn.open) {
+    if (this.connections.size === 0) {
       throw new Error('P2P connection not open for sending chunk');
     }
-    this.conn.send(data);
+    for (const conn of this.connections.values()) {
+      if (conn.open) {
+        conn.send(data);
+      }
+    }
   }
 
   public sendBatchChunk(fileIndex: number, chunkIndex: number, payload: ArrayBuffer): void {
@@ -216,84 +277,101 @@ export class PeerJSService {
   }
 
   public sendItemAck(fileIndex: number): void {
-    if (!this.conn || !this.conn.open) return;
-    this.conn.send(JSON.stringify({ type: 'ITEM_ACK', fileIndex }));
+    const msg = JSON.stringify({ type: 'ITEM_ACK', fileIndex });
+    for (const conn of this.connections.values()) {
+      if (conn.open) {
+        conn.send(msg);
+      }
+    }
   }
 
   public sendManifest(manifest: FileManifest): void {
-    if (!this.conn || !this.conn.open) {
+    if (this.connections.size === 0) {
       throw new Error('P2P connection not open');
     }
-    this.conn.send(JSON.stringify(manifest));
+    const msg = JSON.stringify(manifest);
+    for (const conn of this.connections.values()) {
+      if (conn.open) {
+        conn.send(msg);
+      }
+    }
   }
 
   public sendBatchManifest(manifest: BatchManifest): void {
-    if (!this.conn || !this.conn.open) {
+    if (this.connections.size === 0) {
       throw new Error('P2P connection not open');
     }
     this.isBatchActive = true;
-    this.conn.send(JSON.stringify(manifest));
+    const msg = JSON.stringify(manifest);
+    for (const conn of this.connections.values()) {
+      if (conn.open) {
+        conn.send(msg);
+      }
+    }
   }
 
   public sendIntegrityReport(report: IntegrityReport): void {
-    if (!this.conn || !this.conn.open) return;
-    this.conn.send(JSON.stringify({ type: 'INTEGRITY_REPORT', ...report }));
+    const msg = JSON.stringify({ type: 'INTEGRITY_REPORT', ...report });
+    for (const conn of this.connections.values()) {
+      if (conn.open) {
+        conn.send(msg);
+      }
+    }
   }
 
   public sendBatchIntegrityReport(report: BatchIntegrityReport): void {
-    if (!this.conn || !this.conn.open) return;
-    this.conn.send(JSON.stringify({ type: 'BATCH_INTEGRITY_REPORT', ...report }));
+    const msg = JSON.stringify({ type: 'BATCH_INTEGRITY_REPORT', ...report });
+    for (const conn of this.connections.values()) {
+      if (conn.open) {
+        conn.send(msg);
+      }
+    }
   }
 
   public sendItemComplete(fileIndex: number): void {
-    if (!this.conn || !this.conn.open) return;
-    this.conn.send(JSON.stringify({ type: 'ITEM_COMPLETE', fileIndex }));
+    const msg = JSON.stringify({ type: 'ITEM_COMPLETE', fileIndex });
+    for (const conn of this.connections.values()) {
+      if (conn.open) {
+        conn.send(msg);
+      }
+    }
   }
 
   public sendTransferComplete(): void {
-    if (!this.conn || !this.conn.open) return;
-    this.conn.send(JSON.stringify({ type: 'TRANSFER_COMPLETE' }));
-  }
-
-  public async sendFileStream(
-    file: File | Blob,
-    onProgress: (bytesSent: number) => void,
-    chunkSize = 64 * 1024
-  ): Promise<void> {
-    if (!this.conn || !this.conn.open) {
-      throw new Error('P2P channel not open for file transfer');
-    }
-
-    const totalBytes = file.size;
-    let offset = 0;
-    let chunkIndex = 0;
-
-    while (offset < totalBytes) {
-      const slice = file.slice(offset, offset + chunkSize);
-      const buffer = await slice.arrayBuffer();
-      const packed = packChunkHeader(chunkIndex, buffer);
-
-      this.conn.send(packed);
-
-      offset += buffer.byteLength;
-      chunkIndex++;
-      onProgress(offset);
-
-      // Throttling loop every 16 chunks to allow browser event loop and RTC buffer drain
-      if (chunkIndex % 16 === 0) {
-        await new Promise((r) => setTimeout(r, 4));
+    const msg = JSON.stringify({ type: 'TRANSFER_COMPLETE' });
+    for (const conn of this.connections.values()) {
+      if (conn.open) {
+        conn.send(msg);
       }
     }
-
-    this.sendTransferComplete();
   }
 
   public isConnected(): boolean {
+    if (this.connections.size > 0) {
+      for (const conn of this.connections.values()) {
+        if (conn.open) return true;
+      }
+    }
     return this.conn !== null && this.conn.open;
+  }
+
+  public getConnectedPeerCount(): number {
+    return this.connections.size;
   }
 
   public destroy(): void {
     this.isBatchActive = false;
+    this.isBroadcast = false;
+
+    for (const conn of this.connections.values()) {
+      try {
+        conn.close();
+      } catch (e) {
+        // ignore
+      }
+    }
+    this.connections.clear();
+
     if (this.conn) {
       this.conn.close();
       this.conn = null;

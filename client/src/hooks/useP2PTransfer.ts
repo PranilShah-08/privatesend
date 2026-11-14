@@ -15,6 +15,7 @@ import {
   getChunkIv,
 } from '../services/encryptionService.js';
 import { zeroizeMapBuffers, revokeBlobUrls } from '../services/panicWipeService.js';
+import { createInMemoryZip } from '../services/zipBundleService.js';
 import type { BatchItemState } from '../components/BatchItemCard.js';
 import type {
   ParticipantRole,
@@ -65,9 +66,26 @@ export function useP2PTransfer() {
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [inspectItem, setInspectItem] = useState<BatchItemState | null>(null);
 
+  // Version 2.1: Folder Streaming & Multi-User Broadcast States
+  const [isBroadcastHost, setIsBroadcastHost] = useState<boolean>(false);
+  const [connectedReceiversCount, setConnectedReceiversCount] = useState<number>(0);
+  const [connectedReceiverIds, setConnectedReceiverIds] = useState<string[]>([]);
+  const [isFolder, setIsFolder] = useState<boolean>(false);
+  const [rootFolderName, setRootFolderName] = useState<string>('folder');
+  const [zipBlobUrl, setZipBlobUrl] = useState<string | null>(null);
+
   // Mutable refs
   const modeRef = useRef<ParticipantRole>(mode);
   modeRef.current = mode;
+
+  const isFolderRef = useRef<boolean>(isFolder);
+  isFolderRef.current = isFolder;
+
+  const rootFolderNameRef = useRef<string>(rootFolderName);
+  rootFolderNameRef.current = rootFolderName;
+
+  const isBroadcastHostRef = useRef<boolean>(isBroadcastHost);
+  isBroadcastHostRef.current = isBroadcastHost;
 
   const roomCodeRef = useRef<string>(roomCode);
   roomCodeRef.current = roomCode;
@@ -97,6 +115,7 @@ export function useP2PTransfer() {
     revokeBlobUrls(blobUrlsRef.current);
     blobUrlsRef.current.clear();
     setDownloadUrl(null);
+    setZipBlobUrl(null);
   }, []);
 
   // Panic wipe session: immediate memory zeroization & active connection teardown
@@ -124,6 +143,11 @@ export function useP2PTransfer() {
     setIsTransferring(false);
     setTransferStats(null);
     setInspectItem(null);
+    setIsFolder(false);
+    setRootFolderName('folder');
+    setIsBroadcastHost(false);
+    setConnectedReceiversCount(0);
+    setConnectedReceiverIds([]);
     setStatusText('Session wiped. Connection terminated & memory zeroed.');
   }, [cleanupAllBlobUrls]);
 
@@ -145,6 +169,7 @@ export function useP2PTransfer() {
     setIsTransferring(false);
     setTransferStats(null);
     setInspectItem(null);
+    setZipBlobUrl(null);
   }, [cleanupAllBlobUrls]);
 
   // Receiver: incoming batch manifest handler
@@ -171,6 +196,16 @@ export function useP2PTransfer() {
         cryptoKeyRef.current = null;
       }
 
+      if (manifest.isFolder) {
+        setIsFolder(true);
+        isFolderRef.current = true;
+        setRootFolderName(manifest.folderName || 'folder');
+        rootFolderNameRef.current = manifest.folderName || 'folder';
+      } else {
+        setIsFolder(false);
+        isFolderRef.current = false;
+      }
+
       // Initialize batch items state
       const initialItems: BatchItemState[] = manifest.files.map((f, idx) => ({
         fileIndex: f.fileIndex,
@@ -178,6 +213,7 @@ export function useP2PTransfer() {
         fileName: f.fileName,
         fileSize: f.fileSize,
         fileType: f.fileType,
+        relativePath: f.relativePath,
         status: idx === 0 ? 'transferring' : 'pending',
         progressPercentage: 0,
       }));
@@ -357,23 +393,24 @@ export function useP2PTransfer() {
         }
       }
 
-      setBatchItems((prev) =>
-        prev.map((item, idx) =>
-          idx === fileIndex
-            ? {
-                ...item,
-                status: isMatch ? 'completed' : 'error',
-                integrityReport: report,
-                downloadUrl: url,
-                rawBlob: assembledBlob,
-                progressPercentage: 100,
-                error: isMatch ? undefined : 'Hash mismatch',
-              }
-            : idx === fileIndex + 1
-            ? { ...item, status: 'transferring' }
-            : item
-        )
+      const updatedBatchItems = batchItemsRef.current.map((item, idx) =>
+        idx === fileIndex
+          ? {
+              ...item,
+              status: isMatch ? ('completed' as const) : ('error' as const),
+              integrityReport: report,
+              downloadUrl: url,
+              rawBlob: assembledBlob,
+              progressPercentage: 100,
+              error: isMatch ? undefined : 'Hash mismatch',
+            }
+          : idx === fileIndex + 1
+          ? { ...item, status: 'transferring' as const }
+          : item
       );
+
+      batchItemsRef.current = updatedBatchItems;
+      setBatchItems(updatedBatchItems);
 
       // Advance active pointer to next file
       setActiveItemIndex(fileIndex + 1);
@@ -397,14 +434,44 @@ export function useP2PTransfer() {
       .filter((r): r is IntegrityReport => Boolean(r));
 
     const isAllMatch = reports.length > 0 && reports.every((r) => r.isMatch);
+
+    // If batch is a folder, create an in-memory zip bundle
+    let createdZipUrl: string | null = null;
+    if (batchManifestRef.current?.isFolder && isAllMatch) {
+      try {
+        const zipPayload: Array<{ relativePath: string; buffer: ArrayBuffer }> = [];
+        for (const item of batchItemsRef.current) {
+          if (item.rawBlob) {
+            const buf = await item.rawBlob.arrayBuffer();
+            zipPayload.push({
+              relativePath: item.relativePath || item.fileName,
+              buffer: buf,
+            });
+          }
+        }
+        if (zipPayload.length > 0) {
+          const zipBlob = createInMemoryZip(zipPayload);
+          createdZipUrl = URL.createObjectURL(zipBlob);
+          blobUrlsRef.current.add(createdZipUrl);
+          setZipBlobUrl(createdZipUrl);
+        }
+      } catch (zipErr) {
+        console.error('Failed to create in-memory ZIP on batch complete', zipErr);
+      }
+    }
+
     const batchReport: BatchIntegrityReport = {
       batchId: batchManifestRef.current?.batchId || 'batch-1',
       totalFiles: reports.length,
+      isFolder: batchManifestRef.current?.isFolder,
+      folderName: batchManifestRef.current?.folderName,
+      zipBlobUrl: createdZipUrl,
       allMatched: isAllMatch,
-      items: reports.map((r) => ({
+      items: reports.map((r, i) => ({
         fileId: r.fileId,
         fileName: r.fileName,
         fileSize: r.fileSize,
+        relativePath: batchItemsRef.current[i]?.relativePath,
         senderSha256: r.senderSha256,
         receiverSha256: r.receiverSha256,
         isMatch: r.isMatch,
@@ -461,12 +528,29 @@ export function useP2PTransfer() {
         roomCodeRef.current = code;
         setStatusText('Waiting for sender...');
       },
-      onPeerConnected: () => {
+      onPeerConnected: (peerId) => {
         setPeerConnected(true);
-        setStatusText('Peer connected. Direct encrypted channel ready.');
+        if (peerId) {
+          setConnectedReceiverIds((prev) => (prev.includes(peerId) ? prev : [...prev, peerId]));
+        }
+        setConnectedReceiversCount((prev) => prev + 1);
+        setStatusText(
+          isBroadcastHostRef.current
+            ? 'Receiver connected to broadcast session.'
+            : 'Peer connected. Direct encrypted channel ready.'
+        );
       },
-      onPeerDisconnected: () => {
-        setPeerConnected(false);
+      onPeerDisconnected: (peerId) => {
+        if (peerId) {
+          setConnectedReceiverIds((prev) => prev.filter((id) => id !== peerId));
+        }
+        setConnectedReceiversCount((prev) => {
+          const next = Math.max(0, prev - 1);
+          if (next === 0 && !isBroadcastHostRef.current) {
+            setPeerConnected(false);
+          }
+          return next;
+        });
         setStatusText('Peer disconnected.');
       },
       onManifestReceived: (manifest) => {
@@ -559,6 +643,9 @@ export function useP2PTransfer() {
       modeRef.current = newMode;
       setErrorText(null);
       setPeerConnected(false);
+      setIsBroadcastHost(false);
+      setConnectedReceiversCount(0);
+      setConnectedReceiverIds([]);
       resetTransferState();
       peerServiceRef.current?.destroy();
 
@@ -593,21 +680,87 @@ export function useP2PTransfer() {
     initializeReceiverRoom();
   }, [initializeReceiverRoom]);
 
-  // Multi-file selection handlers
-  const handleSelectFiles = useCallback((files: File[]) => {
-    setSelectedFiles(files);
-    const items: BatchItemState[] = files.map((f, idx) => ({
-      fileIndex: idx,
-      fileId: `file-${idx}`,
-      fileName: f.name,
-      fileSize: f.size,
-      fileType: f.type || 'application/octet-stream',
-      status: 'pending',
-      progressPercentage: 0,
-      rawBlob: f,
-    }));
-    setBatchItems(items);
+  // Version 2.1: Initialize 1-to-Many Broadcast Session as Sender
+  const initBroadcastSession = useCallback(async () => {
+    setErrorText(null);
+    resetTransferState();
+    setIsBroadcastHost(true);
+    isBroadcastHostRef.current = true;
+    setModeState('sender');
+    modeRef.current = 'sender';
+    setConnectedReceiversCount(0);
+    setConnectedReceiverIds([]);
+
+    const code = generateRoomCode();
+    setRoomCode(code);
+    roomCodeRef.current = code;
+    setStatusText('Claiming broadcast session room code...');
+
+    try {
+      await peerServiceRef.current?.initBroadcastHost(code);
+    } catch (err: any) {
+      if (err.message === 'ROOM_CODE_TAKEN') {
+        initBroadcastSession();
+      } else {
+        setErrorText(err.message || 'Failed to initialize broadcast session.');
+      }
+    }
+  }, [resetTransferState]);
+
+  const cancelBroadcastSession = useCallback(() => {
+    setIsBroadcastHost(false);
+    isBroadcastHostRef.current = false;
+    setConnectedReceiversCount(0);
+    setConnectedReceiverIds([]);
+    setRoomCode('');
+    roomCodeRef.current = '';
+    peerServiceRef.current?.destroy();
+    setStatusText('Broadcast session ended.');
   }, []);
+
+  // Multi-file & Folder selection handlers
+  const handleSelectFiles = useCallback(
+    (files: File[], isDir = false, dirName = '') => {
+      setSelectedFiles(files);
+      setIsFolder(isDir);
+      isFolderRef.current = isDir;
+
+      if (dirName) {
+        setRootFolderName(dirName);
+        rootFolderNameRef.current = dirName;
+      } else if (files.length > 0 && (files[0] as any).relativePath?.includes('/')) {
+        const parts = (files[0] as any).relativePath.split('/');
+        setRootFolderName(parts[0]);
+        rootFolderNameRef.current = parts[0];
+        setIsFolder(true);
+        isFolderRef.current = true;
+      } else {
+        setIsFolder(false);
+        isFolderRef.current = false;
+      }
+
+      const items: BatchItemState[] = files.map((f, idx) => ({
+        fileIndex: idx,
+        fileId: `file-${idx}`,
+        fileName: f.name,
+        fileSize: f.size,
+        fileType: f.type || 'application/octet-stream',
+        relativePath: (f as any).relativePath || f.name,
+        status: 'pending',
+        progressPercentage: 0,
+        rawBlob: f,
+      }));
+      setBatchItems(items);
+    },
+    []
+  );
+
+  const handleSelectFolder = useCallback(
+    (files: File[], folderName: string) => {
+      handleSelectFiles(files, true, folderName);
+    },
+    [handleSelectFiles]
+  );
 
   const handleSelectSingleFile = useCallback(
     (file: File | null) => {
@@ -657,6 +810,8 @@ export function useP2PTransfer() {
         const totalChunks = calculateTotalChunks(file.size, DEFAULT_CHUNK_SIZE);
         totalBytes += file.size;
 
+        const relativePath = (file as any).relativePath || file.name;
+
         itemManifests.push({
           type: 'MANIFEST',
           fileIndex: i,
@@ -664,6 +819,7 @@ export function useP2PTransfer() {
           fileName: file.name,
           fileSize: file.size,
           fileType: file.type || 'application/octet-stream',
+          relativePath,
           chunkSize: DEFAULT_CHUNK_SIZE,
           totalChunks,
           sha256,
@@ -684,6 +840,8 @@ export function useP2PTransfer() {
         encrypted: enableE2EE,
         saltHex,
         batchNonce,
+        isFolder: isFolderRef.current,
+        folderName: isFolderRef.current ? rootFolderNameRef.current : undefined,
         files: itemManifests,
       };
 
@@ -801,5 +959,15 @@ export function useP2PTransfer() {
     sendFiles,
     sendFile: () => sendFiles(true),
     panicWipeSession,
+    // Version 2.1: Folder & Broadcast extensions
+    isBroadcastHost,
+    connectedReceiversCount,
+    connectedReceiverIds,
+    initBroadcastSession,
+    cancelBroadcastSession,
+    isFolder,
+    rootFolderName,
+    zipBlobUrl,
+    setSelectedFolder: handleSelectFolder,
   };
 }

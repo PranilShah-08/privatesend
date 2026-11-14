@@ -281,4 +281,89 @@ describe('Signaling Server Integration', () => {
     client.disconnect();
     rateLimitClient.disconnect();
   });
+
+  it('manages local Wi-Fi presence announcements and consent request flow', async () => {
+    const clientA = ioc(`http://localhost:${port}`) as ClientSocket<ServerToClientEvents, ClientToServerEvents>;
+    const clientB = ioc(`http://localhost:${port}`) as ClientSocket<ServerToClientEvents, ClientToServerEvents>;
+
+    await Promise.all([
+      new Promise<void>((r) => clientA.on('connect', () => r())),
+      new Promise<void>((r) => clientB.on('connect', () => r())),
+    ]);
+
+    // Announce client B
+    const bPeersPromise = new Promise<any[]>((resolve) => {
+      clientB.on('local:peers-updated', (peers) => resolve(peers));
+    });
+    clientB.emit('local:announce', { deviceName: "Bob's MacBook", peerId: 'peer-b-123' });
+    const peersB = await bPeersPromise;
+    expect(peersB.length).toBeGreaterThan(0);
+
+    // Client A sends transfer consent request to client B
+    const bIncomingReqPromise = new Promise<any>((resolve) => {
+      clientB.on('local:incoming-request', (req) => resolve(req));
+    });
+
+    clientA.emit('local:request-transfer', {
+      targetSocketId: clientB.id!,
+      senderDeviceName: "Alice's PC",
+      senderPeerId: 'peer-a-456',
+      fileCount: 2,
+      totalBytes: 2048,
+      firstFileName: 'doc.pdf',
+    });
+
+    const incoming = await bIncomingReqPromise;
+    expect(incoming.senderDeviceName).toBe("Alice's PC");
+    expect(incoming.fileCount).toBe(2);
+
+    // Client B accepts transfer
+    const aAcceptedPromise = new Promise<any>((resolve) => {
+      clientA.on('local:request-accepted', (data) => resolve(data));
+    });
+
+    clientB.emit('local:respond-transfer', {
+      requestId: incoming.requestId,
+      senderSocketId: clientA.id!,
+      accepted: true,
+      receiverPeerId: 'peer-b-123',
+    });
+
+    const acceptedData = await aAcceptedPromise;
+    expect(acceptedData.receiverPeerId).toBe('peer-b-123');
+
+    clientA.disconnect();
+    clientB.disconnect();
+  });
+
+  it('creates and joins broadcast rooms with multiple receivers', async () => {
+    const host = ioc(`http://localhost:${port}`) as ClientSocket<ServerToClientEvents, ClientToServerEvents>;
+    const rec1 = ioc(`http://localhost:${port}`) as ClientSocket<ServerToClientEvents, ClientToServerEvents>;
+    const rec2 = ioc(`http://localhost:${port}`) as ClientSocket<ServerToClientEvents, ClientToServerEvents>;
+
+    const createdPromise = new Promise<{ code: string }>((resolve) => {
+      host.on('room:created', (data) => resolve(data));
+    });
+    host.emit('broadcast:create');
+    const { code } = await createdPromise;
+    expect(code).toMatch(/^\d{3}-\d{3}$/);
+
+    const rec1JoinedPromise = new Promise<any>((resolve) => {
+      rec1.on('room:joined', (data) => resolve(data));
+    });
+    rec1.emit('broadcast:join', { code });
+    const rec1Data = await rec1JoinedPromise;
+    expect(rec1Data.type).toBe('broadcast');
+
+    const rec2JoinedPromise = new Promise<any>((resolve) => {
+      rec2.on('room:joined', (data) => resolve(data));
+    });
+    rec2.emit('broadcast:join', { code });
+    const rec2Data = await rec2JoinedPromise;
+    expect(rec2Data.type).toBe('broadcast');
+
+    host.disconnect();
+    rec1.disconnect();
+    rec2.disconnect();
+  });
 });

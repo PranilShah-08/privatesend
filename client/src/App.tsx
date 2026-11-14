@@ -7,7 +7,12 @@ import { TransferProgress } from './components/TransferProgress.js';
 import { ChecksumBadge } from './components/ChecksumBadge.js';
 import { BatchItemCard, BatchItemState } from './components/BatchItemCard.js';
 import { AIInspectorDrawer } from './components/AIInspectorDrawer.js';
+import { ConsentModal } from './components/ConsentModal.js';
+import { LocalDevicesList } from './components/LocalDevicesList.js';
+import { FolderTreeViewer } from './components/FolderTreeViewer.js';
 import { useP2PTransfer } from './hooks/useP2PTransfer.js';
+import { useLocalDiscovery } from './hooks/useLocalDiscovery.js';
+import type { NearbyPeer } from '../../shared/types.js';
 
 export const App: React.FC = () => {
   const {
@@ -26,6 +31,7 @@ export const App: React.FC = () => {
     isTransferring,
     transferStats,
     integrityReport,
+    batchIntegrityReport,
     downloadUrl,
     inspectItem,
     setInspectItem,
@@ -33,10 +39,45 @@ export const App: React.FC = () => {
     createNewRoom,
     sendFiles,
     panicWipeSession,
+    // Version 2.1 extensions
+    isBroadcastHost,
+    connectedReceiversCount,
+    connectedReceiverIds,
+    initBroadcastSession,
+    cancelBroadcastSession,
+    isFolder,
+    rootFolderName,
+    setSelectedFolder,
   } = useP2PTransfer();
+
+  const {
+    nearbyPeers,
+    pendingRequest,
+    requestStatusText,
+    requestTransfer,
+    acceptIncomingRequest,
+    declineIncomingRequest,
+  } = useLocalDiscovery(roomCode);
 
   const handleInspectAI = (item: BatchItemState) => {
     setInspectItem(item);
+  };
+
+  const handleSelectNearbyPeer = async (peer: NearbyPeer) => {
+    try {
+      const receiverPeerId = await requestTransfer(peer.socketId, {
+        fileCount: selectedFiles.length || 1,
+        totalBytes: selectedFiles.reduce((acc, f) => acc + f.size, 0),
+        firstFileName: selectedFiles[0]?.name || (isFolder ? rootFolderName : 'file'),
+        isFolder,
+        folderName: isFolder ? rootFolderName : undefined,
+      });
+      if (receiverPeerId) {
+        await joinRoom(receiverPeerId);
+      }
+    } catch (err) {
+      console.error('Local peer transfer request rejected or failed', err);
+    }
   };
 
   const currentFile =
@@ -72,17 +113,39 @@ export const App: React.FC = () => {
               peerConnected={peerConnected}
               connectionMode={connectionMode}
               onRefresh={createNewRoom}
+              onJoinBroadcast={joinRoom}
             />
           ) : (
-            <SenderCard
-              peerConnected={peerConnected}
-              onJoinRoom={joinRoom}
-              selectedFiles={selectedFiles}
-              onSelectFiles={setSelectedFiles}
-              onSendFiles={sendFiles}
-              isTransferring={isTransferring}
-              errorText={errorText}
-            />
+            <>
+              <SenderCard
+                peerConnected={peerConnected}
+                onJoinRoom={joinRoom}
+                selectedFiles={selectedFiles}
+                onSelectFiles={setSelectedFiles}
+                onSendFiles={sendFiles}
+                isTransferring={isTransferring}
+                errorText={errorText}
+                isBroadcastHost={isBroadcastHost}
+                broadcastRoomCode={roomCode}
+                connectedReceiversCount={connectedReceiversCount}
+                receiverIds={connectedReceiverIds}
+                onInitBroadcast={initBroadcastSession}
+                onCancelBroadcast={cancelBroadcastSession}
+                isFolder={isFolder}
+                folderName={rootFolderName}
+                onSelectFolder={setSelectedFolder}
+              />
+
+              {/* Local Wi-Fi Nearby Devices Presence */}
+              {!peerConnected && !isBroadcastHost && (
+                <LocalDevicesList
+                  peers={nearbyPeers}
+                  onSelectPeer={handleSelectNearbyPeer}
+                  statusText={requestStatusText}
+                  isTransferring={isTransferring}
+                />
+              )}
+            </>
           )}
 
           {/* Transfer Progress Telemetry */}
@@ -93,6 +156,20 @@ export const App: React.FC = () => {
               isSender={mode === 'sender'}
               currentFileIndex={activeItemIndex}
               totalFiles={batchManifest?.totalFiles || selectedFiles.length || 1}
+            />
+          )}
+
+          {/* Folder Hierarchy Preview & In-Memory Zip Download */}
+          {isFolder && batchItems.length > 0 && (
+            <FolderTreeViewer
+              folderName={rootFolderName}
+              files={batchItems.map((item) => ({
+                fileName: item.fileName,
+                fileSize: item.fileSize,
+                relativePath: item.relativePath,
+                rawBlob: item.rawBlob,
+              }))}
+              allVerified={batchIntegrityReport?.allMatched}
             />
           )}
 
@@ -128,6 +205,13 @@ export const App: React.FC = () => {
           )}
         </main>
       </div>
+
+      {/* Local Wi-Fi Transfer Consent Prompt Modal */}
+      <ConsentModal
+        request={pendingRequest}
+        onAccept={acceptIncomingRequest}
+        onDecline={declineIncomingRequest}
+      />
 
       {/* Ephemeral AI Document Inspector Drawer */}
       {inspectItem && inspectItem.rawBlob && (

@@ -19,6 +19,9 @@ export default defineConfig({
         'client/src/services/panicWipeService.ts',
         'client/src/services/qrCodeService.ts',
         'client/src/services/aiInspectorService.ts',
+        'client/src/services/zipBundleService.ts',
+        'client/src/services/folderTraversalService.ts',
+        'client/src/services/wifiDiscoveryService.ts',
         'client/src/utils/**',
       ],
       thresholds: {
