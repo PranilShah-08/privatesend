@@ -105,7 +105,7 @@ export function useP2PTransfer() {
   // Multi-file chunk storage: Map<fileIndex, Map<chunkIndex, ArrayBuffer>>
   const receivedChunksRef = useRef<Map<number, Map<number, ArrayBuffer>>>(new Map());
   const totalReceivedBytesRef = useRef<number>(0);
-  const cryptoKeyRef = useRef<CryptoKey | null>(null);
+  const cryptoKeyRef = useRef<Promise<CryptoKey> | null>(null);
   const batchNonceRef = useRef<number>(0);
   const blobUrlsRef = useRef<Set<string>>(new Set());
   const pendingAckResolversRef = useRef<Map<number, () => void>>(new Map());
@@ -186,12 +186,11 @@ export function useP2PTransfer() {
 
       // Prepare encryption key if sender enabled E2EE with dynamic salt
       if (manifest.encrypted && roomCodeRef.current) {
-        try {
-          const salt = manifest.saltHex ? hexToBytes(manifest.saltHex) : DEFAULT_SALT;
-          cryptoKeyRef.current = await deriveKeyFromRoomCode(roomCodeRef.current, salt);
-        } catch (e) {
+        const salt = manifest.saltHex ? hexToBytes(manifest.saltHex) : DEFAULT_SALT;
+        cryptoKeyRef.current = deriveKeyFromRoomCode(roomCodeRef.current, salt).catch((e) => {
           console.error('Failed to derive receiver decryption key', e);
-        }
+          throw e;
+        });
       } else {
         cryptoKeyRef.current = null;
       }
@@ -308,6 +307,11 @@ export function useP2PTransfer() {
       const fileManifest = manifest?.files[fileIndex];
       if (!fileManifest) return;
 
+      const existingItem = batchItemsRef.current[fileIndex];
+      if (existingItem && existingItem.status === 'completed') {
+        return;
+      }
+
       const fileMap = receivedChunksRef.current.get(fileIndex);
       const rawChunks: ArrayBuffer[] = [];
       let missingChunk = false;
@@ -335,11 +339,12 @@ export function useP2PTransfer() {
 
       // Decrypt chunks if E2EE is enabled using per-batch nonce
       const finalChunks: ArrayBuffer[] = [];
-      if (manifest?.encrypted && cryptoKeyRef.current) {
+      const derivedKey = cryptoKeyRef.current ? await cryptoKeyRef.current : null;
+      if (manifest?.encrypted && derivedKey) {
         try {
           for (let i = 0; i < rawChunks.length; i++) {
             const iv = getChunkIv(i, fileIndex, batchNonceRef.current);
-            const decrypted = await decryptPayload(rawChunks[i], cryptoKeyRef.current, iv);
+            const decrypted = await decryptPayload(rawChunks[i], derivedKey, iv);
             finalChunks.push(decrypted);
           }
         } catch (decErr) {
@@ -360,15 +365,15 @@ export function useP2PTransfer() {
       // Assemble into Blob
       const assembledBlob = new Blob(finalChunks, { type: fileManifest.fileType });
 
-      // Zeroize intermediate raw chunks in RAM for THIS file only
+      // Verify SHA-256 bit-for-bit match
+      const receiverSha256 = await computeFileSha256(assembledBlob);
+      const isMatch = receiverSha256.toLowerCase() === fileManifest.sha256.toLowerCase();
+
+      // Zeroize intermediate raw chunks in RAM for THIS file only (AFTER hash verification)
       if (fileMap) {
         zeroizeMapBuffers(fileMap);
         receivedChunksRef.current.delete(fileIndex);
       }
-
-      // Verify SHA-256 bit-for-bit match
-      const receiverSha256 = await computeFileSha256(assembledBlob);
-      const isMatch = receiverSha256.toLowerCase() === fileManifest.sha256.toLowerCase();
 
       // Emit item acknowledgment to sender
       peerServiceRef.current?.sendItemAck(fileIndex);
@@ -423,7 +428,10 @@ export function useP2PTransfer() {
   const handleBatchTransferComplete = useCallback(async () => {
     const activeIdx = activeItemIndexRef.current;
     if (batchManifestRef.current && activeIdx < batchManifestRef.current.files.length) {
-      await handleItemComplete(activeIdx);
+      const activeItem = batchItemsRef.current[activeIdx];
+      if (activeItem && activeItem.status !== 'completed' && activeItem.status !== 'error') {
+        await handleItemComplete(activeIdx);
+      }
     }
 
     setIsTransferring(false);

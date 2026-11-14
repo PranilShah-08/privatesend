@@ -1,4 +1,5 @@
 import { DEFAULT_CHUNK_SIZE, packChunkHeader, unpackChunkHeader } from './chunkerService.js';
+import { DEFAULT_ICE_SERVERS } from './peerjsService.js';
 import type { FileManifest, IntegrityReport } from '../../../shared/types.js';
 
 export interface WebRTCServiceEvents {
@@ -17,10 +18,7 @@ export class WebRTCService {
   private dc: RTCDataChannel | null = null;
   private events: WebRTCServiceEvents;
   private readonly config: RTCConfiguration = {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:global.stun.twilio.com:3478' },
-    ],
+    iceServers: DEFAULT_ICE_SERVERS,
   };
 
   constructor(events: WebRTCServiceEvents = {}) {

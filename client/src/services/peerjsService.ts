@@ -11,6 +11,50 @@ import type {
   BatchIntegrityReport,
 } from '../../../shared/types.js';
 
+export const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun2.l.google.com:19302' },
+  { urls: 'stun:stun.cloudflare.com:3478' },
+];
+
+/**
+ * Installs WebRTC ICE enhancements in browser environments:
+ * Enhances addIceCandidate so that if an anonymized .local mDNS host candidate arrives,
+ * a loopback (127.0.0.1) candidate is also attempted in parallel, allowing two tabs or
+ * apps on the same device to connect immediately without mDNS discovery failures.
+ */
+export function setupWebRTCEnhancements(): void {
+  if (typeof window === 'undefined' || !(window as any).RTCPeerConnection) return;
+  const globalWin = window as any;
+  if (globalWin.__webrtc_enhancements_installed) return;
+  globalWin.__webrtc_enhancements_installed = true;
+
+  const origProto = globalWin.RTCPeerConnection.prototype;
+  const origAddIce = origProto.addIceCandidate;
+
+  origProto.addIceCandidate = function (candidate: any, ...args: any[]) {
+    if (candidate && candidate.candidate && candidate.candidate.includes('.local')) {
+      const loopbackStr = candidate.candidate.replace(/[0-9a-f-]+\.local/, '127.0.0.1');
+      const loopbackCand =
+        typeof candidate.toJSON === 'function'
+          ? { ...candidate.toJSON(), candidate: loopbackStr }
+          : { ...candidate, candidate: loopbackStr };
+      try {
+        origAddIce.call(this, loopbackCand, ...args).catch(() => {});
+      } catch {
+        // Ignored
+      }
+    }
+    return origAddIce.call(this, candidate, ...args);
+  };
+}
+
+// Auto-install enhancements in browser context
+if (typeof window !== 'undefined') {
+  setupWebRTCEnhancements();
+}
+
 export interface PeerJSServiceCallbacks {
   onReady?: (code: string) => void;
   onPeerConnected?: (peerId?: string) => void;
@@ -52,10 +96,7 @@ export class PeerJSService {
         const peer = new Peer(peerId, {
           debug: 1,
           config: {
-            iceServers: [
-              { urls: 'stun:stun.l.google.com:19302' },
-              { urls: 'stun:global.stun.twilio.com:3478' },
-            ],
+            iceServers: DEFAULT_ICE_SERVERS,
           },
         });
 
@@ -103,10 +144,7 @@ export class PeerJSService {
         const peer = new Peer(peerId, {
           debug: 1,
           config: {
-            iceServers: [
-              { urls: 'stun:stun.l.google.com:19302' },
-              { urls: 'stun:global.stun.twilio.com:3478' },
-            ],
+            iceServers: DEFAULT_ICE_SERVERS,
           },
         });
 
@@ -149,10 +187,7 @@ export class PeerJSService {
         const peer = new Peer({
           debug: 1,
           config: {
-            iceServers: [
-              { urls: 'stun:stun.l.google.com:19302' },
-              { urls: 'stun:global.stun.twilio.com:3478' },
-            ],
+            iceServers: DEFAULT_ICE_SERVERS,
           },
         });
 
@@ -245,17 +280,29 @@ export class PeerJSService {
       } catch (e) {
         console.error('Failed to parse signaling message', e);
       }
-    } else if (data instanceof ArrayBuffer) {
-      try {
-        if (this.isBatchActive) {
-          const { fileIndex, chunkIndex, payload } = unpackBatchChunkHeader(data);
-          this.callbacks.onChunkReceived?.(chunkIndex, payload, fileIndex);
-        } else {
-          const { chunkIndex, payload } = unpackChunkHeader(data);
-          this.callbacks.onChunkReceived?.(chunkIndex, payload, 0);
+    } else {
+      let buffer: ArrayBuffer | null = null;
+      if (data instanceof ArrayBuffer) {
+        buffer = data;
+      } else if (ArrayBuffer.isView(data)) {
+        buffer = data.buffer.slice(
+          data.byteOffset,
+          data.byteOffset + data.byteLength
+        ) as ArrayBuffer;
+      }
+
+      if (buffer) {
+        try {
+          if (this.isBatchActive) {
+            const { fileIndex, chunkIndex, payload } = unpackBatchChunkHeader(buffer);
+            this.callbacks.onChunkReceived?.(chunkIndex, payload, fileIndex);
+          } else {
+            const { chunkIndex, payload } = unpackChunkHeader(buffer);
+            this.callbacks.onChunkReceived?.(chunkIndex, payload, 0);
+          }
+        } catch (e) {
+          console.error('Failed to unpack chunk', e);
         }
-      } catch (e) {
-        console.error('Failed to unpack chunk', e);
       }
     }
   }

@@ -21,6 +21,11 @@ export function useLocalDiscovery(peerId: string) {
 
   // Initialize socket connection once on mount
   useEffect(() => {
+    // If running on a static host without a backend (such as GitHub Pages), skip Socket.IO
+    if (typeof window !== 'undefined' && window.location.hostname.endsWith('github.io')) {
+      return;
+    }
+
     const socketUrl =
       typeof window !== 'undefined'
         ? window.location.origin
@@ -28,6 +33,8 @@ export function useLocalDiscovery(peerId: string) {
 
     const socket: Socket<ServerToClientEvents, ClientToServerEvents> = socketIO(socketUrl, {
       transports: ['websocket', 'polling'],
+      autoConnect: true,
+      reconnectionAttempts: 3,
     });
 
     socketRef.current = socket;
