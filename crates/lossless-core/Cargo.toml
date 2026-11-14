@@ -1,0 +1,20 @@
+[package]
+name = "lossless-core"
+version = "0.1.0"
+edition = "2021"
+authors = ["LosslessDrop Core Team"]
+description = "High-performance streaming SHA-256 verifier and zero-copy chunk slicer with zero retention"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+sha2 = "0.10"
+hex = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+zeroize = { version = "1.8", features = ["derive"] }
+thiserror = "2.0"
+bytes = "1.9"
+
+[dev-dependencies]
+tempfile = "3.14"

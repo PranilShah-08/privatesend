@@ -1,0 +1,61 @@
+version: '3.9'
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lossless-drop-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOST=0.0.0.0
+    # Strict Privacy Enforcement: Read-only container filesystem, zero persistent storage
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64M
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+
+  ai-indexer:
+    build:
+      context: ./services/ai-indexer
+      dockerfile: Dockerfile
+    container_name: lossless-drop-ai-indexer
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - EPHEMERAL_MODE=true
+    # Zero disk persistence: In-memory LlamaIndex, read-only rootfs
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64M
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.5'
+
+  rust-core:
+    build:
+      context: ./crates/lossless-core
+      dockerfile: Dockerfile
+    container_name: lossless-drop-rust-core
+    restart: "no"
+    # Read-only execution, zero disk retention
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64M
