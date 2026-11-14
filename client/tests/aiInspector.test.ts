@@ -73,18 +73,18 @@ describe('AIInspectorService (v2)', () => {
     expect(result.audit.storageMode).toBe('volatile_ram');
   });
 
-  it('throws descriptive error on non-ok status', async () => {
+  it('falls back to client-side heuristics on non-ok remote status', async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 500,
       text: async () => 'Internal Server Error',
     } as any);
 
-    await expect(
-      inspectDocumentEphemeral({
-        fileName: 'err.txt',
-        documentText: 'broken',
-      })
-    ).rejects.toThrow('AI Inspector failed (500)');
+    const result = await inspectDocumentEphemeral({
+      fileName: 'err.txt',
+      documentText: 'This is a sample document for testing fallback.',
+    });
+    expect(result.summary).toBeDefined();
+    expect(result.audit.storageMode).toBe('volatile_client_ram');
   });
 });

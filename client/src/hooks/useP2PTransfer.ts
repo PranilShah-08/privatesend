@@ -16,6 +16,10 @@ import {
 } from '../services/encryptionService.js';
 import { zeroizeMapBuffers, revokeBlobUrls } from '../services/panicWipeService.js';
 import { createInMemoryZip } from '../services/zipBundleService.js';
+import {
+  playVerificationSuccessChime,
+  playErrorChime,
+} from '../services/audioFeedbackService.js';
 import type { BatchItemState } from '../components/BatchItemCard.js';
 import type {
   ParticipantRole,
@@ -402,12 +406,15 @@ export function useP2PTransfer() {
 
       let url: string | undefined;
       if (isMatch) {
+        playVerificationSuccessChime();
         url = URL.createObjectURL(assembledBlob);
         blobUrlsRef.current.add(url);
         if (fileIndex === 0) {
           setDownloadUrl(url);
           setIntegrityReport(report);
         }
+      } else {
+        playErrorChime();
       }
 
       const updatedBatchItems = batchItemsRef.current.map((item, idx) =>
@@ -455,9 +462,9 @@ export function useP2PTransfer() {
 
     const isAllMatch = reports.length > 0 && reports.every((r) => r.isMatch);
 
-    // If batch is a folder, create an in-memory zip bundle
+    // If batch is a folder or multiple files, create an in-memory zip bundle
     let createdZipUrl: string | null = null;
-    if (batchManifestRef.current?.isFolder && isAllMatch) {
+    if (isAllMatch && (batchManifestRef.current?.isFolder || reports.length > 1)) {
       try {
         const zipPayload: Array<{ relativePath: string; buffer: ArrayBuffer }> = [];
         for (const item of batchItemsRef.current) {
@@ -600,10 +607,20 @@ export function useP2PTransfer() {
       onIntegrityReport: (report) => {
         setIntegrityReport(report);
         setIsTransferring(false);
+        if (report.isMatch) {
+          playVerificationSuccessChime();
+        } else {
+          playErrorChime();
+        }
       },
       onBatchIntegrityReport: (report) => {
         setBatchIntegrityReport(report);
         setIsTransferring(false);
+        if (report.allMatched) {
+          playVerificationSuccessChime();
+        } else {
+          playErrorChime();
+        }
         setBatchItems((prev) =>
           prev.map((item, idx) => {
             const itemReport = report.items[idx];
@@ -922,9 +939,10 @@ export function useP2PTransfer() {
               )
             );
 
-            // Yield to browser event loop
-            if (chunkIndex % 16 === 0) {
-              await new Promise((r) => setTimeout(r, 4));
+            // Yield and throttle backpressure to keep browser memory & dataChannel bounded
+            if (chunkIndex % 8 === 0) {
+              await peerServiceRef.current?.waitForBufferDrain(1024 * 1024);
+              await new Promise((r) => setTimeout(r, 2));
             }
           }
 

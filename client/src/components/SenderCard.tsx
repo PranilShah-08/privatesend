@@ -40,6 +40,7 @@ interface SenderCardProps {
   isFolder?: boolean;
   folderName?: string;
   onSelectFolder?: (files: File[], folderName: string) => void;
+  initialRoomCode?: string;
 }
 
 export const SenderCard: React.FC<SenderCardProps> = ({
@@ -59,11 +60,12 @@ export const SenderCard: React.FC<SenderCardProps> = ({
   isFolder = false,
   folderName = '',
   onSelectFolder,
+  initialRoomCode = '',
 }) => {
   const [sendType, setSendType] = useState<'direct' | 'broadcast'>(
     isBroadcastHost ? 'broadcast' : 'direct'
   );
-  const [code, setCode] = useState('');
+  const [code, setCode] = useState(initialRoomCode || '');
   const [isDragging, setIsDragging] = useState(false);
   const [enableE2EE, setEnableE2EE] = useState(true);
   const [showQr, setShowQr] = useState(false);
@@ -71,6 +73,12 @@ export const SenderCard: React.FC<SenderCardProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (initialRoomCode) {
+      setCode(normalizeRoomCode(initialRoomCode));
+    }
+  }, [initialRoomCode]);
 
   useEffect(() => {
     if (isBroadcastHost) {

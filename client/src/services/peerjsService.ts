@@ -318,6 +318,56 @@ export class PeerJSService {
     }
   }
 
+  public getBufferedAmount(): number {
+    let total = 0;
+    for (const conn of this.connections.values()) {
+      if (!conn.open) continue;
+      const dc: RTCDataChannel | undefined = (conn as any).dataChannel;
+      if (dc && typeof dc.bufferedAmount === 'number') {
+        total += dc.bufferedAmount;
+      }
+    }
+    return total;
+  }
+
+  public async waitForBufferDrain(maxBufferedAmount = 1024 * 1024): Promise<void> {
+    const promises: Promise<void>[] = [];
+
+    for (const conn of this.connections.values()) {
+      if (!conn.open) continue;
+      const dc: RTCDataChannel | undefined = (conn as any).dataChannel;
+      if (dc && typeof dc.bufferedAmount === 'number' && dc.bufferedAmount > maxBufferedAmount) {
+        promises.push(
+          new Promise<void>((resolve) => {
+            let timeoutId: any = null;
+            const onLow = () => {
+              if (timeoutId) clearTimeout(timeoutId);
+              try {
+                dc.removeEventListener('bufferedamountlow', onLow);
+              } catch {}
+              resolve();
+            };
+
+            try {
+              dc.bufferedAmountLowThreshold = Math.min(
+                Math.floor(maxBufferedAmount / 2),
+                512 * 1024
+              );
+              dc.addEventListener('bufferedamountlow', onLow);
+              timeoutId = setTimeout(onLow, 250);
+            } catch {
+              resolve();
+            }
+          })
+        );
+      }
+    }
+
+    if (promises.length > 0) {
+      await Promise.all(promises);
+    }
+  }
+
   public sendBatchChunk(fileIndex: number, chunkIndex: number, payload: ArrayBuffer): void {
     const packed = packBatchChunkHeader(fileIndex, chunkIndex, payload);
     this.sendChunk(packed);

@@ -1,4 +1,5 @@
 import React from 'react';
+import { Download } from 'lucide-react';
 import { MinimalHeader } from './components/MinimalHeader.js';
 import { ModeSwitch } from './components/ModeSwitch.js';
 import { ReceiverCard } from './components/ReceiverCard.js';
@@ -12,6 +13,7 @@ import { LocalDevicesList } from './components/LocalDevicesList.js';
 import { FolderTreeViewer } from './components/FolderTreeViewer.js';
 import { useP2PTransfer } from './hooks/useP2PTransfer.js';
 import { useLocalDiscovery } from './hooks/useLocalDiscovery.js';
+import { formatZipFileName, formatBatchZipFileName } from './services/zipBundleService.js';
 import type { NearbyPeer } from '../../shared/types.js';
 
 export const App: React.FC = () => {
@@ -47,6 +49,7 @@ export const App: React.FC = () => {
     cancelBroadcastSession,
     isFolder,
     rootFolderName,
+    zipBlobUrl,
     setSelectedFolder,
   } = useP2PTransfer();
 
@@ -143,6 +146,7 @@ export const App: React.FC = () => {
                 isFolder={isFolder}
                 folderName={rootFolderName}
                 onSelectFolder={setSelectedFolder}
+                initialRoomCode={roomCode}
               />
 
               {/* Local Wi-Fi Nearby Devices Presence */}
@@ -186,14 +190,32 @@ export const App: React.FC = () => {
           {/* Multi-File Batch Items List */}
           {batchItems.length > 0 && (
             <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 shadow-sm">
-              <div className="flex items-center justify-between mb-3 px-1">
-                <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
-                  Batch Queue ({batchItems.length} {batchItems.length === 1 ? 'file' : 'files'})
-                </span>
-                {batchManifest?.encrypted && (
-                  <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
-                    AES-256-GCM
+              <div className="flex items-center justify-between mb-3 px-1 gap-2 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+                    Batch Queue ({batchItems.length} {batchItems.length === 1 ? 'file' : 'files'})
                   </span>
+                  {batchManifest?.encrypted && (
+                    <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
+                      AES-256-GCM
+                    </span>
+                  )}
+                </div>
+
+                {zipBlobUrl && batchItems.length > 1 && (
+                  <a
+                    href={zipBlobUrl}
+                    download={
+                      isFolder
+                        ? formatZipFileName(rootFolderName)
+                        : formatBatchZipFileName(batchItems.length)
+                    }
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100 transition-colors shadow-xs"
+                    title="Download all verified files as an in-memory ZIP package"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download All (.zip)</span>
+                  </a>
                 )}
               </div>
 
