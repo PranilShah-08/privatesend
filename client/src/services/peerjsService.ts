@@ -35,7 +35,7 @@ export function setupWebRTCEnhancements(): void {
 
   origProto.addIceCandidate = function (candidate: any, ...args: any[]) {
     if (candidate && candidate.candidate && candidate.candidate.includes('.local')) {
-      const loopbackStr = candidate.candidate.replace(/[0-9a-f-]+\.local/, '127.0.0.1');
+      const loopbackStr = candidate.candidate.replace(/[^\s]+\.local/i, '127.0.0.1');
       const loopbackCand =
         typeof candidate.toJSON === 'function'
           ? { ...candidate.toJSON(), candidate: loopbackStr }

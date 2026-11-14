@@ -105,7 +105,7 @@ export function useP2PTransfer() {
   // Multi-file chunk storage: Map<fileIndex, Map<chunkIndex, ArrayBuffer>>
   const receivedChunksRef = useRef<Map<number, Map<number, ArrayBuffer>>>(new Map());
   const totalReceivedBytesRef = useRef<number>(0);
-  const cryptoKeyRef = useRef<Promise<CryptoKey> | null>(null);
+  const cryptoKeyRef = useRef<Promise<CryptoKey | null> | null>(null);
   const batchNonceRef = useRef<number>(0);
   const blobUrlsRef = useRef<Set<string>>(new Set());
   const pendingAckResolversRef = useRef<Map<number, () => void>>(new Map());
@@ -160,6 +160,7 @@ export function useP2PTransfer() {
     totalReceivedBytesRef.current = 0;
     cleanupAllBlobUrls();
     pendingAckResolversRef.current.clear();
+    cryptoKeyRef.current = null;
 
     setBatchItems([]);
     setBatchManifest(null);
@@ -189,7 +190,7 @@ export function useP2PTransfer() {
         const salt = manifest.saltHex ? hexToBytes(manifest.saltHex) : DEFAULT_SALT;
         cryptoKeyRef.current = deriveKeyFromRoomCode(roomCodeRef.current, salt).catch((e) => {
           console.error('Failed to derive receiver decryption key', e);
-          throw e;
+          return null;
         });
       } else {
         cryptoKeyRef.current = null;
@@ -340,7 +341,18 @@ export function useP2PTransfer() {
       // Decrypt chunks if E2EE is enabled using per-batch nonce
       const finalChunks: ArrayBuffer[] = [];
       const derivedKey = cryptoKeyRef.current ? await cryptoKeyRef.current : null;
-      if (manifest?.encrypted && derivedKey) {
+      if (manifest?.encrypted) {
+        if (!derivedKey) {
+          setErrorText(
+            `Decryption failed for "${fileManifest.fileName}". Encryption key unavailable.`
+          );
+          setBatchItems((prev) =>
+            prev.map((item, idx) =>
+              idx === fileIndex ? { ...item, status: 'error', error: 'Key derivation failed' } : item
+            )
+          );
+          return;
+        }
         try {
           for (let i = 0; i < rawChunks.length; i++) {
             const iv = getChunkIv(i, fileIndex, batchNonceRef.current);
