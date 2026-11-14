@@ -1,28 +1,28 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: lossless-drop-ingress
+  name: privatesend-ingress
   annotations:
     kubernetes.io/ingress.class: nginx
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
-    nginx.ingress.kubernetes.io/websocket-services: "lossless-drop-service"
+    nginx.ingress.kubernetes.io/websocket-services: "privatesend-service"
 spec:
   rules:
-    - host: drop.local
+    - host: privatesend.local
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: lossless-drop-service
+                name: privatesend-service
                 port:
                   number: 80
           - path: /ai
             pathType: Prefix
             backend:
               service:
-                name: lossless-drop-ai-service
+                name: privatesend-ai-service
                 port:
                   number: 8000

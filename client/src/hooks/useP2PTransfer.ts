@@ -1,25 +1,23 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { io as ioc, Socket } from 'socket.io-client';
-import { WebRTCService } from '../services/webrtcService.js';
+import { PeerJSService } from '../services/peerjsService.js';
 import { computeFileSha256 } from '../services/cryptoService.js';
 import { SpeedCalculator } from '../services/speedCalculator.js';
 import { calculateTotalChunks, DEFAULT_CHUNK_SIZE } from '../services/chunkerService.js';
+import { generateRoomCode } from '../utils/codeValidator.js';
 import type {
   ParticipantRole,
   FileManifest,
   TransferProgressStats,
   IntegrityReport,
   ConnectionMode,
-  ServerToClientEvents,
-  ClientToServerEvents,
 } from '../../../shared/types.js';
 
 export function useP2PTransfer() {
   const [mode, setModeState] = useState<ParticipantRole>('receiver');
   const [roomCode, setRoomCode] = useState<string>('');
   const [peerConnected, setPeerConnected] = useState<boolean>(false);
-  const [connectionMode, setConnectionMode] = useState<ConnectionMode>('p2p-webrtc');
-  const [statusText, setStatusText] = useState<string>('Initializing...');
+  const [connectionMode] = useState<ConnectionMode>('p2p-webrtc');
+  const [statusText, setStatusText] = useState<string>('Initializing P2P...');
   const [errorText, setErrorText] = useState<string | null>(null);
 
   // File & Transfer States
@@ -30,7 +28,7 @@ export function useP2PTransfer() {
   const [integrityReport, setIntegrityReport] = useState<IntegrityReport | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
 
-  // Current values tracked in refs to eliminate stale closure traps in event listeners
+  // Mutable refs to prevent stale closure traps
   const modeRef = useRef<ParticipantRole>(mode);
   modeRef.current = mode;
 
@@ -43,12 +41,10 @@ export function useP2PTransfer() {
   const downloadUrlRef = useRef<string | null>(downloadUrl);
   downloadUrlRef.current = downloadUrl;
 
-  const socketRef = useRef<Socket<ServerToClientEvents, ClientToServerEvents> | null>(null);
-  const webrtcRef = useRef<WebRTCService | null>(null);
+  const peerServiceRef = useRef<PeerJSService | null>(null);
   const speedCalcRef = useRef<SpeedCalculator>(new SpeedCalculator());
   const receivedChunksRef = useRef<Map<number, ArrayBuffer>>(new Map());
   const totalReceivedBytesRef = useRef<number>(0);
-  const fallbackTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const cleanupDownloadUrl = useCallback(() => {
     if (downloadUrlRef.current) {
@@ -68,11 +64,6 @@ export function useP2PTransfer() {
     setIsTransferring(false);
     setTransferStats(null);
   }, [cleanupDownloadUrl]);
-
-  const switchToFallbackRelay = useCallback(() => {
-    setConnectionMode('fallback-relay');
-    setStatusText('Connected via Encrypted Relay (Lossless Active)');
-  }, []);
 
   const handleIncomingManifest = useCallback((manifest: FileManifest) => {
     cleanupDownloadUrl();
@@ -111,7 +102,7 @@ export function useP2PTransfer() {
     }
 
     if (missingChunk) {
-      setErrorText(`Transfer failed: Expected ${manifest.totalChunks} chunks but received ${chunks.length}.`);
+      setErrorText(`Transfer failed: Missing chunks (${chunks.length}/${manifest.totalChunks}).`);
       setIsTransferring(false);
       return;
     }
@@ -119,6 +110,7 @@ export function useP2PTransfer() {
     const assembledBlob = new Blob(chunks, { type: manifest.fileType });
     receivedChunksRef.current.clear();
     chunks.length = 0;
+
     const receiverSha256 = await computeFileSha256(assembledBlob);
     const isMatch = receiverSha256.toLowerCase() === manifest.sha256.toLowerCase();
 
@@ -145,33 +137,47 @@ export function useP2PTransfer() {
     }
 
     // Send verification report back to sender
-    const currentCode = roomCodeRef.current;
-    if (webrtcRef.current?.isChannelOpen()) {
-      webrtcRef.current.sendIntegrityReport(report);
-    } else {
-      socketRef.current?.emit('relay:integrity', { code: currentCode, report });
-    }
+    peerServiceRef.current?.sendIntegrityReport(report);
   }, [cleanupDownloadUrl]);
 
-  // WebRTC Setup using mutable refs for dynamic state
-  const setupWebRTCConnection = useCallback(() => {
-    if (!socketRef.current) return;
+  // Receiver room initializer
+  const initializeReceiverRoom = useCallback(async () => {
+    setErrorText(null);
+    resetTransferState();
+    setPeerConnected(false);
 
-    const webrtc = new WebRTCService({
-      onConnectionStateChange: (state) => {
-        if (state === 'connected') {
-          setConnectionMode('p2p-webrtc');
-          setStatusText('Direct P2P Encrypted Channel Ready');
-          if (fallbackTimeoutRef.current) {
-            clearTimeout(fallbackTimeoutRef.current);
-            fallbackTimeoutRef.current = null;
-          }
-        } else if (state === 'failed' || state === 'disconnected') {
-          switchToFallbackRelay();
-        }
+    const code = generateRoomCode();
+    setRoomCode(code);
+    roomCodeRef.current = code;
+    setStatusText('Claiming room code...');
+
+    try {
+      await peerServiceRef.current?.initReceiver(code);
+    } catch (err: any) {
+      if (err.message === 'ROOM_CODE_TAKEN') {
+        // Retry with another code
+        initializeReceiverRoom();
+      } else {
+        setErrorText(err.message || 'Failed to initialize receiver room.');
+      }
+    }
+  }, [resetTransferState]);
+
+  // Setup PeerJS service instance
+  useEffect(() => {
+    const service = new PeerJSService({
+      onReady: (code) => {
+        setRoomCode(code);
+        roomCodeRef.current = code;
+        setStatusText('Waiting for sender...');
       },
-      onDataChannelOpen: () => {
-        setStatusText('Lossless Channel Ready. Drop files to transfer.');
+      onPeerConnected: () => {
+        setPeerConnected(true);
+        setStatusText('Peer connected. Encrypted channel ready.');
+      },
+      onPeerDisconnected: () => {
+        setPeerConnected(false);
+        setStatusText('Peer disconnected.');
       },
       onManifestReceived: (manifest) => {
         handleIncomingManifest(manifest);
@@ -186,128 +192,25 @@ export function useP2PTransfer() {
         setIntegrityReport(report);
         setIsTransferring(false);
       },
+      onError: (err) => {
+        setErrorText(err.message);
+      },
+      onStatusChange: (status) => {
+        setStatusText(status);
+      },
     });
 
-    webrtcRef.current = webrtc;
+    peerServiceRef.current = service;
 
-    webrtc.initPeerConnection((candidate) => {
-      socketRef.current?.emit('webrtc:ice-candidate', {
-        code: roomCodeRef.current,
-        candidate,
-      });
-    });
-
-    // Sender initiates WebRTC DataChannel and offer
-    if (modeRef.current === 'sender') {
-      webrtc.createDataChannel('losslessDrop');
-      webrtc.createOffer().then((offer) => {
-        socketRef.current?.emit('webrtc:offer', { code: roomCodeRef.current, sdp: offer });
-      });
-
-      // 8-second safety fallback: if P2P does not connect, use zero-storage memory relay
-      fallbackTimeoutRef.current = setTimeout(() => {
-        if (!webrtc.isChannelOpen()) {
-          switchToFallbackRelay();
-        }
-      }, 8000);
+    if (modeRef.current === 'receiver') {
+      initializeReceiverRoom();
     }
-  }, [switchToFallbackRelay, handleIncomingManifest, handleIncomingChunk, finishReceivedFile]);
-
-  // Initialize Socket.io connection and wire callbacks
-  useEffect(() => {
-    const socket: Socket<ServerToClientEvents, ClientToServerEvents> = ioc({
-      transports: ['websocket', 'polling'],
-    });
-    socketRef.current = socket;
-
-    socket.on('connect', () => {
-      setStatusText('Ready');
-      if (modeRef.current === 'receiver') {
-        socket.emit('room:create');
-      }
-    });
-
-    socket.on('room:created', (data) => {
-      setRoomCode(data.code);
-      roomCodeRef.current = data.code;
-      setStatusText('Waiting for sender...');
-    });
-
-    socket.on('room:joined', (data) => {
-      setRoomCode(data.code);
-      roomCodeRef.current = data.code;
-      setStatusText('Connecting to receiver...');
-    });
-
-    socket.on('peer:connected', () => {
-      setPeerConnected(true);
-      setStatusText('Peer connected. Establishing encrypted channel...');
-      setupWebRTCConnection();
-    });
-
-    socket.on('peer:disconnected', (data) => {
-      setPeerConnected(false);
-      setStatusText(data.reason || 'Peer disconnected');
-      webrtcRef.current?.close();
-    });
-
-    socket.on('webrtc:offer', async (data) => {
-      if (webrtcRef.current) {
-        try {
-          const answer = await webrtcRef.current.handleOffer(data.sdp);
-          socket.emit('webrtc:answer', { code: roomCodeRef.current, sdp: answer });
-        } catch (e) {
-          console.error('Failed to handle offer', e);
-        }
-      }
-    });
-
-    socket.on('webrtc:answer', async (data) => {
-      if (webrtcRef.current) {
-        try {
-          await webrtcRef.current.handleAnswer(data.sdp);
-        } catch (e) {
-          console.error('Failed to handle answer', e);
-        }
-      }
-    });
-
-    socket.on('webrtc:ice-candidate', async (data) => {
-      if (webrtcRef.current) {
-        await webrtcRef.current.addIceCandidate(data.candidate);
-      }
-    });
-
-    socket.on('relay:manifest', (manifest) => {
-      handleIncomingManifest(manifest);
-    });
-
-    socket.on('relay:chunk', ({ chunkIndex, data }) => {
-      handleIncomingChunk(chunkIndex, data);
-    });
-
-    socket.on('relay:complete', () => {
-      finishReceivedFile();
-    });
-
-    socket.on('relay:integrity', (report) => {
-      setIntegrityReport(report);
-      setIsTransferring(false);
-    });
-
-    socket.on('error', (err) => {
-      setErrorText(err.message);
-    });
 
     return () => {
-      socket.disconnect();
-      webrtcRef.current?.close();
+      service.destroy();
       cleanupDownloadUrl();
-      if (fallbackTimeoutRef.current) {
-        clearTimeout(fallbackTimeoutRef.current);
-      }
     };
-  }, [setupWebRTCConnection, handleIncomingManifest, handleIncomingChunk, finishReceivedFile, cleanupDownloadUrl]);
+  }, [initializeReceiverRoom, handleIncomingManifest, handleIncomingChunk, finishReceivedFile, cleanupDownloadUrl]);
 
   // Mode change handler
   const setMode = useCallback((newMode: ParticipantRole) => {
@@ -318,38 +221,36 @@ export function useP2PTransfer() {
     setErrorText(null);
     setPeerConnected(false);
     resetTransferState();
-    webrtcRef.current?.close();
+    peerServiceRef.current?.destroy();
 
     if (newMode === 'receiver') {
-      setRoomCode('');
-      roomCodeRef.current = '';
-      if (socketRef.current?.connected) {
-        socketRef.current.emit('room:create');
-      }
+      initializeReceiverRoom();
     } else {
       setRoomCode('');
       roomCodeRef.current = '';
       setSelectedFile(null);
       setStatusText('Enter 6-digit receiver code');
     }
-  }, [resetTransferState]);
+  }, [resetTransferState, initializeReceiverRoom]);
 
   // Join Room as Sender
-  const joinRoom = useCallback((code: string) => {
+  const joinRoom = useCallback(async (code: string) => {
     setErrorText(null);
     setRoomCode(code);
     roomCodeRef.current = code;
-    socketRef.current?.emit('room:join', { code });
+    setStatusText('Connecting to receiver...');
+
+    try {
+      await peerServiceRef.current?.connectToReceiver(code);
+    } catch (err: any) {
+      setErrorText(err.message || 'Failed to connect to receiver.');
+    }
   }, []);
 
   // Create new room as Receiver
   const createNewRoom = useCallback(() => {
-    setErrorText(null);
-    resetTransferState();
-    setPeerConnected(false);
-    webrtcRef.current?.close();
-    socketRef.current?.emit('room:create');
-  }, [resetTransferState]);
+    initializeReceiverRoom();
+  }, [initializeReceiverRoom]);
 
   // Sender starts file transmission
   const sendFile = useCallback(async () => {
@@ -375,44 +276,17 @@ export function useP2PTransfer() {
 
     speedCalcRef.current.start(selectedFile.size);
 
-    if (connectionMode === 'p2p-webrtc' && webrtcRef.current?.isChannelOpen()) {
-      webrtcRef.current.sendManifest(manifest);
-      await webrtcRef.current.sendFileStream(selectedFile, (bytesSent) => {
+    try {
+      peerServiceRef.current?.sendManifest(manifest);
+      await peerServiceRef.current?.sendFileStream(selectedFile, (bytesSent) => {
         const stats = speedCalcRef.current.update(bytesSent);
         setTransferStats(stats);
       });
-    } else {
-      // Fallback relay transmission
-      const currentCode = roomCodeRef.current;
-      socketRef.current?.emit('relay:manifest', { code: currentCode, manifest });
-      let offset = 0;
-      let chunkIdx = 0;
-
-      while (offset < selectedFile.size) {
-        const slice = selectedFile.slice(offset, offset + DEFAULT_CHUNK_SIZE);
-        const buffer = await slice.arrayBuffer();
-
-        socketRef.current?.emit('relay:chunk', {
-          code: currentCode,
-          chunkIndex: chunkIdx,
-          totalChunks,
-          data: buffer,
-        });
-
-        offset += buffer.byteLength;
-        chunkIdx++;
-        const stats = speedCalcRef.current.update(offset);
-        setTransferStats(stats);
-
-        // Yield to event loop every 16 chunks to prevent client socket buffer overflow
-        if (chunkIdx % 16 === 0) {
-          await new Promise((resolve) => setTimeout(resolve, 5));
-        }
-      }
-
-      socketRef.current?.emit('relay:complete', { code: currentCode, fileId: manifest.fileId });
+    } catch (err: any) {
+      setErrorText(err.message || 'Transfer failed.');
+      setIsTransferring(false);
     }
-  }, [selectedFile, connectionMode]);
+  }, [selectedFile]);
 
   return {
     mode,

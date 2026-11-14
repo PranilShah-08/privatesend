@@ -1,9 +1,9 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: lossless-drop-service
+  name: privatesend-service
   labels:
-    app.kubernetes.io/name: lossless-drop
+    app.kubernetes.io/name: privatesend
 spec:
   type: ClusterIP
   ports:
@@ -12,14 +12,14 @@ spec:
       targetPort: 3000
       protocol: TCP
   selector:
-    app.kubernetes.io/name: lossless-drop
+    app.kubernetes.io/name: privatesend
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: lossless-drop-ai-service
+  name: privatesend-ai-service
   labels:
-    app.kubernetes.io/name: lossless-drop
+    app.kubernetes.io/name: privatesend
     app.kubernetes.io/component: ai-indexer
 spec:
   type: ClusterIP

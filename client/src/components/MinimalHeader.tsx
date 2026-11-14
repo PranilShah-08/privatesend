@@ -9,7 +9,7 @@ export const MinimalHeader: React.FC = () => {
           <Zap className="w-4 h-4 fill-current" />
         </div>
         <h1 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-          LosslessDrop
+          PrivateSend
         </h1>
       </div>
 

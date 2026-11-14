@@ -1,6 +1,6 @@
 # Privacy & Zero-Retention Architecture
 
-LosslessDrop is built with privacy as an immutable constraint:
+PrivateSend is built with privacy as an immutable constraint:
 
 ## 1. Zero Disk Persistence
 - **No File Storage**: Neither the signaling server nor any backend component ever writes, caches, or stores file payload bytes on disk.

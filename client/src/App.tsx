@@ -87,7 +87,7 @@ export const App: React.FC = () => {
       </div>
 
       <footer className="text-center py-6 text-xs text-zinc-400 dark:text-zinc-600">
-        <p>LosslessDrop • Bit-for-bit direct browser-to-browser transmission</p>
+        <p>PrivateSend • Bit-for-bit direct browser-to-browser transmission</p>
       </footer>
     </div>
   );

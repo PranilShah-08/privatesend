@@ -1,11 +1,23 @@
-# LosslessDrop ⚡
+# PrivateSend ⚡
 
 > **Simple, minimalist, private peer-to-peer file transfer with bit-for-bit quality preservation, zero server storage, and strict two-party room security.**
 
-[![Tests](https://img.shields.io/badge/tests-32%20passed-emerald)](https://github.com/PranilShah-08/lossless-drop)
-[![Coverage](https://img.shields.io/badge/coverage-95.9%25-brightgreen)](https://github.com/PranilShah-08/lossless-drop)
-[![Zero-Persistence](https://img.shields.io/badge/privacy-zero%20disk%20storage-blue)](PRIVACY.md)
-[![License](https://img.shields.io/badge/license-MIT-zinc)](LICENSE)
+[![Live Web App](https://img.shields.io/badge/Live%20App-GitHub%20Pages-blue?style=for-the-badge&logo=github)](https://pranilshah-08.github.io/privatesend/)
+[![Tests](https://img.shields.io/badge/tests-82%20passed-emerald?style=for-the-badge)](https://github.com/PranilShah-08/privatesend)
+[![Zero-Persistence](https://img.shields.io/badge/privacy-zero%20disk%20storage-purple?style=for-the-badge)](PRIVACY.md)
+[![License](https://img.shields.io/badge/license-MIT-zinc?style=for-the-badge)](LICENSE)
+
+---
+
+## 🌐 Live Web Application (Zero Domain Required)
+
+Anyone anywhere can use PrivateSend instantly in their browser with zero install or server setup:
+
+👉 **[https://pranilshah-08.github.io/privatesend/](https://pranilshah-08.github.io/privatesend/)**
+
+- **Direct Browser-to-Browser**: File payloads transfer directly over WebRTC DataChannels (DTLS-SRTP).
+- **Zero Server Storage**: Files never touch any server disk, cloud database, or third-party storage.
+- **Works on All Devices**: Desktop, iOS Safari, Android Chrome, Firefox, and Edge.
 
 ---
 
@@ -17,7 +29,7 @@
 - 🛡️ **Strict Two-Party Exclusivity**: Rooms accommodate exactly 1 receiver and 1 sender. Once paired, the room automatically locks against all third parties and brute-force attempts.
 - 🌐 **WebRTC P2P DataChannels**: Direct browser-to-browser encrypted transfer (DTLS-SRTP) with adaptive backpressure flow control (`bufferedAmountLowThreshold`).
 - 🔄 **Ephemeral Fallback Relay**: Seamless in-memory WebSocket chunk streaming if symmetric NATs block direct P2P.
-- 🦀 **Rust Core Engine**: Standalone high-performance streaming hasher and chunk processor (`crates/lossless-core`).
+- 🦀 **Rust Core Engine**: Standalone high-performance streaming hasher and zero-copy chunk processor (`crates/lossless-core`) with zeroized memory buffers.
 - 🐍 **Python LlamaIndex Service**: Ephemeral in-memory AI semantic indexing microservice (`services/ai-indexer`) operating strictly in volatile RAM.
 - 🐳 **Docker & Kubernetes Ready**: Production-grade multi-stage Dockerfiles, Docker Compose with read-only rootfs and tmpfs, and hardened K8s manifests.
 
@@ -61,17 +73,20 @@
 
 ## Quick Start
 
-### 1. Local Development
+### 1. Web Application (Hosted on GitHub Pages)
+Open [https://pranilshah-08.github.io/privatesend/](https://pranilshah-08.github.io/privatesend/) directly.
+
+### 2. Local Development
 ```bash
 # Clone the repository
-git clone https://github.com/PranilShah-08/lossless-drop.git
-cd lossless-drop
+git clone https://github.com/PranilShah-08/privatesend.git
+cd privatesend
 
 # Install dependencies
 npm install
 
-# Run test suite with coverage
-npm run test:coverage
+# Run test suite
+npm test
 
 # Build and start the production server
 npm run build
@@ -82,17 +97,17 @@ Visit `http://localhost:3000` in your browser.
 
 ---
 
-### 2. Docker & Docker Compose
+### 3. Docker & Docker Compose
 ```bash
 # Start the web app, Rust core, and Python LlamaIndex microservice
 docker-compose up --build
 ```
 
-All containers run with `read_only: true` and temporary in-memory `/tmp` mounts (`tmpfs: size=64M`). Zero volumes are attached.
+All containers run with `read_only: true` and temporary in-memory `/tmp` mounts (`tmpfs: size=64M`). Zero persistent volumes are attached.
 
 ---
 
-### 3. Kubernetes Deployment
+### 4. Kubernetes Deployment
 ```bash
 # Apply kustomization manifests
 kubectl apply -k k8s/
@@ -117,7 +132,7 @@ volumes:
 
 | Layer | Language / Technology | Purpose |
 |---|---|---|
-| **Web Client** | React 18, TypeScript, Tailwind CSS | Minimalist, distraction-free room UI |
+| **Web Client** | React 18, TypeScript, Tailwind CSS, PeerJS | Minimalist, distraction-free room UI |
 | **P2P Transfer** | WebRTC DataChannels, Web Crypto API | E2E encrypted, 100% bit-for-bit lossless data transfer |
 | **Signaling Server** | Node.js, Express, Socket.io | Ephemeral 1-to-1 room management & WebRTC coordination |
 | **Native Engine** | Rust (`crates/lossless-core`) | High-throughput streaming SHA-256 verifier & chunker |

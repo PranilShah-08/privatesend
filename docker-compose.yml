@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: lossless-drop-web
+    container_name: privatesend-web
     restart: unless-stopped
     ports:
       - "3000:3000"
@@ -29,7 +29,7 @@ services:
     build:
       context: ./services/ai-indexer
       dockerfile: Dockerfile
-    container_name: lossless-drop-ai-indexer
+    container_name: privatesend-ai-indexer
     restart: unless-stopped
     ports:
       - "8000:8000"
@@ -53,7 +53,7 @@ services:
     build:
       context: ./crates/lossless-core
       dockerfile: Dockerfile
-    container_name: lossless-drop-rust-core
+    container_name: privatesend-rust-core
     restart: "no"
     # Read-only execution, zero disk retention
     read_only: true

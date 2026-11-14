@@ -2,7 +2,7 @@
 name = "lossless-core"
 version = "0.1.0"
 edition = "2021"
-authors = ["LosslessDrop Core Team"]
+authors = ["PrivateSend Team"]
 description = "High-performance streaming SHA-256 verifier and zero-copy chunk slicer with zero retention"
 license = "MIT OR Apache-2.0"
 
